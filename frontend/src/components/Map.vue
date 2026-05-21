@@ -1,0 +1,562 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import type { ConvertResult } from '../types'
+
+const props = defineProps<{
+  result: ConvertResult | null
+}>()
+
+const mapContainer = ref<HTMLElement | null>(null)
+const map = ref<any>(null)
+const layers = ref<{name: string, color: string}[]>([])
+const selectedLayers = ref<Set<string>>(new Set())
+const isLayerListCollapsed = ref(false)
+const mouseCoords = ref<[number, number] | null>(null)
+const overlayMessage = ref('请先上传 DWG 文件')
+watch(isLayerListCollapsed, () => {
+  setTimeout(() => {
+    map.value?.resize()
+  }, 350)
+})
+
+const mapMode = ref<'vector' | 'raster'>('vector')
+
+const toggleMode = () => {
+  mapMode.value = mapMode.value === 'vector' ? 'raster' : 'vector'
+  renderMapLayers()
+}
+
+const resetView = () => {
+  if (!map.value || !props.result?.bbox) return
+  const [minX, minY, maxX, maxY] = props.result.bbox
+  // Validate bounds
+  const isValid = (n: number) => Number.isFinite(n) && Math.abs(n) < 1e20
+  const isValidLat = (n: number) => n >= -90 && n <= 90
+  
+  if (isValid(minX) && isValid(minY) && isValid(maxX) && isValid(maxY) &&
+      isValidLat(minY) && isValidLat(maxY)) {
+    try {
+      map.value.fitBounds(props.result.bbox as [number, number, number, number], { padding: 50 })
+    } catch (e) {
+      console.error('Error fitting bounds:', e)
+    }
+  } else {
+    console.warn('Invalid bounds, cannot reset view:', props.result.bbox)
+  }
+}
+
+const toggleLayer = (layerName: string) => {
+  if (selectedLayers.value.has(layerName)) {
+    selectedLayers.value.delete(layerName)
+  } else {
+    selectedLayers.value.add(layerName)
+  }
+  updateMapFilters()
+}
+
+const toggleAllLayers = (e: Event) => {
+  const checked = (e.target as HTMLInputElement).checked
+  if (checked) {
+    selectedLayers.value = new Set(layers.value.map(l => l.name))
+  } else {
+    selectedLayers.value = new Set()
+  }
+  updateMapFilters()
+}
+
+const updateMapFilters = () => {
+  if (!map.value) return
+  
+  const layerFilter: maplibregl.ExpressionSpecification = ['in', ['get', 'Layer'], ['literal', Array.from(selectedLayers.value)]]
+  
+  // Update fill and line layers
+  const shapeLayers = ['dwg-layer-fill', 'dwg-layer-line']
+  const layerIds = map.value.getStyle()?.layers?.map((layer: any) => layer.id) || []
+  const dynamicShapeLayers = layerIds.filter((id: string) =>
+    shapeLayers.some(prefix => id.startsWith(prefix))
+  )
+  dynamicShapeLayers.forEach((id: string) => {
+    if (map.value?.getLayer(id)) {
+      map.value.setFilter(id, layerFilter as maplibregl.FilterSpecification)
+    }
+  })
+
+  // Update text layer (preserve 'has Text' check)
+  const dynamicTextLayers = layerIds.filter((id: string) => id.startsWith('dwg-layer-text'))
+  dynamicTextLayers.forEach((id: string) => {
+    if (map.value.getLayer(id)) {
+      map.value.setFilter(id, ['all', ['has', 'Text'], layerFilter] as maplibregl.FilterSpecification)
+    }
+  })
+}
+
+const renderMapLayers = () => {
+  if (!map.value || !props.result) return
+
+  const sourceId = 'dwg-source'
+  const layerIdLine = 'dwg-layer-line'
+  const layerIdFill = 'dwg-layer-fill'
+  const layerIdText = 'dwg-layer-text'
+  const layerIdRaster = 'dwg-layer-raster'
+  const sourceLayerCandidates = Array.from(new Set([
+    props.result.layer_name,
+    'entities'
+  ].filter((value): value is string => Boolean(value))))
+
+  // Remove existing layers/sources
+  const existingLayerIds = map.value.getStyle()?.layers?.map((layer: any) => layer.id) || []
+  existingLayerIds
+    .filter((id: string) =>
+      id.startsWith(layerIdLine) ||
+      id.startsWith(layerIdFill) ||
+      id.startsWith(layerIdText) ||
+      id === layerIdRaster
+    )
+    .forEach((id: string) => {
+      if (map.value.getLayer(id)) map.value.removeLayer(id)
+    })
+  if (map.value.getLayer(layerIdRaster)) map.value.removeLayer(layerIdRaster)
+  if (map.value.getSource(sourceId)) map.value.removeSource(sourceId)
+
+  if (mapMode.value === 'raster') {
+    if (!props.result.raster_url) {
+      overlayMessage.value = props.result.message || '栅格切片暂不可用'
+      console.warn('No raster URL available')
+      return
+    }
+    let rasterUrl = props.result.raster_url
+    if (rasterUrl.startsWith('/')) rasterUrl = window.location.origin + rasterUrl
+    
+    map.value.addSource(sourceId, {
+      type: 'raster',
+      tiles: [rasterUrl],
+      tileSize: 256,
+      scheme: 'xyz'
+    })
+    
+    map.value.addLayer({
+      id: layerIdRaster,
+      type: 'raster',
+      source: sourceId,
+      paint: {
+        'raster-opacity': 1
+      }
+    })
+    overlayMessage.value = ''
+    return
+  }
+
+  // Vector Mode
+  if (!props.result.mvt_url) {
+    overlayMessage.value = props.result.message || '矢量切片暂不可用'
+    return
+  }
+
+  let mvtUrl = props.result.mvt_url
+  if (mvtUrl.startsWith('/')) {
+    mvtUrl = window.location.origin + mvtUrl
+  }
+  
+  console.log('Loading MVT URL in MapLibre:', mvtUrl)
+
+  map.value.addSource(sourceId, {
+    type: 'vector',
+    tiles: [mvtUrl],
+    scheme: 'xyz'
+  })
+
+  sourceLayerCandidates.forEach((sourceLayer, index) => {
+    const suffix = `-${index}`
+
+    map.value.addLayer({
+      id: `${layerIdFill}${suffix}`,
+      type: 'fill',
+      source: sourceId,
+      'source-layer': sourceLayer,
+      filter: ['==', '$type', 'Polygon'],
+      paint: {
+        'fill-color': ['coalesce', ['get', 'fill_color'], 'rgba(0,0,0,0)'],
+        'fill-opacity': 0.8,
+        'fill-outline-color': 'rgba(0,0,0,0)'
+      }
+    })
+
+    map.value.addLayer({
+      id: `${layerIdLine}${suffix}`,
+      type: 'line',
+      source: sourceId,
+      'source-layer': sourceLayer,
+      filter: ['in', '$type', 'LineString', 'Polygon'],
+      paint: {
+        'line-color': ['coalesce', ['get', 'line_color'], '#2563eb'],
+        'line-width': [
+          'case',
+          ['has', 'line_width'],
+          ['/', ['get', 'line_width'], 25],
+          1
+        ]
+      }
+    })
+
+    map.value.addLayer({
+      id: `${layerIdText}${suffix}`,
+      type: 'symbol',
+      source: sourceId,
+      'source-layer': sourceLayer,
+      layout: {
+        'text-field': ['get', 'Text'],
+        'text-size': 12,
+        'text-rotate': ['get', 'rotation'],
+        'text-allow-overlap': false,
+        'text-ignore-placement': false,
+        'text-rotation-alignment': 'map',
+        'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular']
+      },
+      paint: {
+        'text-color': '#ffffff'
+      },
+      filter: ['has', 'Text']
+    })
+  })
+  
+  // Re-apply filters if needed
+  updateMapFilters()
+  overlayMessage.value = ''
+}
+
+onMounted(() => {
+  if (!mapContainer.value) return
+
+  // Initialize MapLibre GL map (Open-source Mapbox GL compatible)
+  map.value = new maplibregl.Map({
+    container: mapContainer.value,
+    style: {
+      version: 8,
+      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+      sources: {},
+      layers: [
+        {
+          id: 'background',
+          type: 'background',
+          paint: {
+            'background-color': '#eef2f7'
+          }
+        }
+      ]
+    },
+    // center: [116.4, 39.9], // Don't set initial center to avoid loading unnecessary tiles
+    // zoom: 3,
+    localIdeographFontFamily: "'SimSun', 'SimHei', 'sans-serif'"
+  })
+  
+  ;(map.value as any).addControl(new maplibregl.NavigationControl())
+  
+  // Add mouse move event listener to track coordinates
+  map.value.on('mousemove', (e: any) => {
+    const lng = e.lngLat.lng
+    const lat = e.lngLat.lat
+    mouseCoords.value = [lng, lat]
+  })
+  
+  map.value.on('mouseleave', () => {
+    mouseCoords.value = null
+  })
+})
+
+onUnmounted(() => {
+  if (map.value) {
+    map.value.remove()
+    map.value = null
+  }
+})
+
+watch(() => props.result, async (newVal) => {
+  if (!map.value) return
+  if (!newVal) {
+    overlayMessage.value = '请先上传 DWG 文件'
+    return
+  }
+
+  if (newVal.status === 'error') {
+    overlayMessage.value = newVal.message || '转换或发布失败'
+  } else if (newVal.status !== 'done') {
+    overlayMessage.value = newVal.message || '正在处理 DWG...'
+  }
+  
+  // 1. Fetch layers
+  if (newVal.job_id) {
+    try {
+      const res = await fetch(`/api/layers/${newVal.job_id}`)
+      if (res.ok) {
+        const data = await res.json()
+        // Backward compatibility: if array of strings, map to objects
+        if (data.length > 0 && typeof data[0] === 'string') {
+           layers.value = data.map((l: string) => ({ name: l, color: '#9ca3af' }))
+        } else {
+           layers.value = data
+        }
+        selectedLayers.value = new Set(layers.value.map(l => l.name))
+      }
+    } catch (e) {
+      console.error('Fetch layers error:', e)
+    }
+  }
+
+  // 2. Fit Bounds First (to prevent loading tiles for wrong location)
+  // Note: MVT doesn't provide bounds automatically, so we use the bounds from the conversion result.
+  console.log('Conversion result bounds:', newVal.bbox)
+  if (newVal.bbox) {
+    const [minX, minY, maxX, maxY] = newVal.bbox
+    // Validate bounds to prevent MapLibre error
+    const isValid = (n: number) => Number.isFinite(n) && Math.abs(n) < 1e20
+    const isValidLat = (n: number) => n >= -90 && n <= 90
+    
+    if (isValid(minX) && isValid(minY) && isValid(maxX) && isValid(maxY) &&
+        isValidLat(minY) && isValidLat(maxY)) {
+      console.log('Fitting bounds:', newVal.bbox)
+      try {
+        // Use animate: false to jump immediately before loading layers
+        map.value.fitBounds(newVal.bbox as [number, number, number, number], { padding: 50, animate: false })
+      } catch (e) {
+        console.error('Error fitting bounds:', e)
+      }
+    } else {
+      console.warn('Invalid bounds detected, skipping fitBounds:', newVal.bbox)
+    }
+  }
+
+  // 3. Render Map Layers (Vector or Raster)
+  renderMapLayers()
+})
+</script>
+
+<template>
+  <div class="map-wrapper">
+    <div class="sidebar" :class="{ 'is-collapsed': isLayerListCollapsed }" v-if="layers.length > 0 && mapMode === 'vector'">
+      <div class="sidebar-toggle" @click="isLayerListCollapsed = !isLayerListCollapsed" :title="isLayerListCollapsed ? '展开图层列表' : '收起图层列表'">
+        {{ isLayerListCollapsed ? '▶' : '◀' }}
+      </div>
+      <div class="sidebar-content" v-show="!isLayerListCollapsed">
+        <div class="sidebar-header">
+          <h3>图层列表</h3>
+          <label class="select-all">
+            <input type="checkbox" :checked="selectedLayers.size === layers.length" @change="toggleAllLayers" />
+            全选
+          </label>
+        </div>
+        <div class="layer-list">
+          <label v-for="layer in layers" :key="layer.name" class="layer-item">
+            <input type="checkbox" :checked="selectedLayers.has(layer.name)" @change="toggleLayer(layer.name)" />
+            <span class="layer-color-box" :style="{ backgroundColor: layer.color }"></span>
+            <span class="layer-name" :title="layer.name">{{ layer.name }}</span>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div ref="mapContainer" class="map-container">
+       <div v-if="overlayMessage" class="map-overlay">
+         {{ overlayMessage }}
+       </div>
+       <button class="mode-toggle-btn" @click="toggleMode" v-if="result">
+         切换为{{ mapMode === 'vector' ? '栅格切片 (图片)' : '矢量切片 (交互)' }}
+       </button>
+       <button class="reset-btn" @click="resetView" v-if="result">
+         重置视角
+       </button>
+       <div class="coords-display" v-if="mouseCoords">
+         经度：{{ mouseCoords[0].toFixed(6) }}, 纬度：{{ mouseCoords[1].toFixed(6) }}
+       </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.map-wrapper {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar {
+  width: 240px;
+  background: #3b4453;
+  border-right: 1px solid #2d3239;
+  display: flex;
+  flex-direction: row;
+  z-index: 10;
+  box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+  transition: width 0.3s ease;
+}
+
+.sidebar.is-collapsed {
+  width: 24px;
+}
+
+.sidebar-toggle {
+  width: 24px;
+  height: 100%;
+  background: #23272e;
+  color: #9ca3af;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-right: 1px solid #1f2937;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle:hover {
+  background: #374151;
+  color: #fff;
+}
+
+.sidebar-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  height: 100%;
+}
+
+.sidebar-header {
+  padding: 10px 15px;
+  border-bottom: 1px solid #2d3239;
+  background: #2e3440;
+}
+
+.sidebar-header h3 {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+  color: #e5e7eb;
+}
+
+.select-all {
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #9ca3af;
+}
+
+.layer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #d1d5db;
+}
+
+.layer-item:hover {
+  color: #fff;
+}
+
+.layer-color-box {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+.mode-toggle-btn {
+  position: absolute;
+  top: 10px;
+  right: 60px;
+  z-index: 10;
+  background-color: rgba(30, 41, 59, 0.8);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.mode-toggle-btn:hover {
+  background-color: rgba(30, 41, 59, 1);
+}
+
+.reset-btn {
+  position: absolute;
+  bottom: 40px;
+  right: 10px;
+  z-index: 10;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: background-color 0.2s;
+}
+
+.reset-btn:hover {
+  background-color: #2563eb;
+}
+
+.coords-display {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  z-index: 10;
+  background-color: rgba(30, 41, 59, 0.85);
+  color: #e5e7eb;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.layer-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-container {
+  flex: 1;
+  height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(148, 163, 184, 0.18), transparent 28%),
+    linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+  position: relative;
+}
+
+.map-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: #334155;
+  font-size: 16px;
+  font-weight: 500;
+  background: rgba(248, 250, 252, 0.72);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+</style>

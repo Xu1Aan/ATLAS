@@ -1,0 +1,63 @@
+services:
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.28.0
+    restart: unless-stopped
+    environment:
+      GEOSERVER_ADMIN_USER: ${APP_GEOSERVER_USER:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${APP_GEOSERVER_PASSWORD:-geoserver}
+      INSTALL_EXTENSIONS: "true"
+      STABLE_EXTENSIONS: "vectortiles"
+      PROXY_BASE_URL: ${APP_GEOSERVER_PUBLIC_URL:-http://localhost:18081/geoserver}
+    volumes:
+      - geoserver_data:/opt/geoserver/data_dir
+      - shared_jobs:/data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/geoserver/web/"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      APP_WORK_DIR: /data
+      APP_DWG2DXF_CMD: ${APP_DWG2DXF_CMD:-dwg2dxf}
+      APP_OGR2OGR_CMD: ${APP_OGR2OGR_CMD:-ogr2ogr}
+      APP_TARGET_SRS: ${APP_TARGET_SRS:-EPSG:4326}
+      APP_GAUSS_KRUGER_ZONE: ${APP_GAUSS_KRUGER_ZONE:-39}
+      APP_ENABLE_GAUSS_KRUGER_TRANSFORM: ${APP_ENABLE_GAUSS_KRUGER_TRANSFORM:-true}
+      APP_GEOSERVER_URL: http://geoserver:8080/geoserver
+      APP_GEOSERVER_PUBLIC_URL: ${APP_GEOSERVER_PUBLIC_URL:-http://localhost:18081/geoserver}
+      APP_GEOSERVER_USER: ${APP_GEOSERVER_USER:-admin}
+      APP_GEOSERVER_PASSWORD: ${APP_GEOSERVER_PASSWORD:-geoserver}
+      APP_GEOSERVER_WORKSPACE: ${APP_GEOSERVER_WORKSPACE:-dwg}
+    volumes:
+      - shared_jobs:/data
+    depends_on:
+      geoserver:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  web:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "18081:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      geoserver:
+        condition: service_healthy
+
+volumes:
+  geoserver_data:
+  shared_jobs:
