@@ -49,12 +49,19 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
+                deleteDir()
                 sh 'pwd'
                 checkout scmGit(
                     branches: [[name: '*/' + env.GIT_BRANCH]],
-                    extensions: [],
+                    extensions: [cleanBeforeCheckout()],
                     userRemoteConfigs: [[credentialsId: 'jenkins', url: env.GIT_REPO]]
                 )
+                sh """\
+set -eu
+git rev-parse HEAD
+git branch --show-current || true
+git log -1 --oneline
+"""
             }
         }
 
@@ -62,6 +69,8 @@ pipeline {
             steps {
                 sh """\
 set -eu
+echo "===== backend/Dockerfile ====="
+cat ./backend/Dockerfile
 docker build \
   --build-arg PYTHON_BASE_IMAGE=${env.PYTHON_BASE_IMAGE} \
   --build-arg APT_MIRROR=${env.APT_MIRROR} \
