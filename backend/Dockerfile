@@ -29,15 +29,28 @@ RUN apt-get update \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL "${GNU_MIRROR}/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz" -o /tmp/libredwg.tar.xz \
-    && mkdir -p /tmp/libredwg-src \
-    && tar -xf /tmp/libredwg.tar.xz -C /tmp/libredwg-src --strip-components=1 \
-    && cd /tmp/libredwg-src \
-    && ./configure --disable-bindings --disable-docs --enable-release \
-    && make -j"$(nproc)" \
-    && make install \
-    && ldconfig \
-    && rm -rf /tmp/libredwg.tar.xz /tmp/libredwg-src
+RUN set -eux; \
+    urls="\
+${GNU_MIRROR}/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz \
+https://mirrors.aliyun.com/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz \
+https://ftpmirror.gnu.org/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz \
+https://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz"; \
+    downloaded=''; \
+    for url in $urls; do \
+        if curl -fL --retry 3 --connect-timeout 20 "$url" -o /tmp/libredwg.tar.xz; then \
+            downloaded="$url"; \
+            break; \
+        fi; \
+    done; \
+    test -n "$downloaded"; \
+    mkdir -p /tmp/libredwg-src; \
+    tar -xf /tmp/libredwg.tar.xz -C /tmp/libredwg-src --strip-components=1; \
+    cd /tmp/libredwg-src; \
+    ./configure --disable-bindings --disable-docs --enable-release; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    rm -rf /tmp/libredwg.tar.xz /tmp/libredwg-src
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -i "${PIP_INDEX_URL}" -r requirements.txt
