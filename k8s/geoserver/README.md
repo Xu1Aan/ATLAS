@@ -4,7 +4,7 @@ This directory contains a simple Kubernetes deployment for GeoServer that matche
 
 - GeoServer runs as an independent service in Kubernetes
 - the service exposes port `80` and forwards to container port `8080`
-- GeoServer mounts the same shared jobs volume as the backend at `/data` as read-only
+- backend uploads each generated GeoPackage to GeoServer over REST
 - GeoServer data directory is persisted separately
 
 ## Files
@@ -17,23 +17,24 @@ This directory contains a simple Kubernetes deployment for GeoServer that matche
 
 ## Important
 
-GeoServer must be able to read the same `.gpkg` files that the backend writes under `/data/jobs/...`.
+GeoServer no longer depends on a shared `/data` PVC with the backend.
 
-That means:
-
-1. The backend and GeoServer must use the same shared PVC.
-2. The shared PVC should support `ReadWriteMany` in production.
-
-This deployment assumes the backend shared PVC is already named:
-
-`dwg2mvt-shared-jobs`
-
-If your actual PVC name is different, update `deployment.yaml`.
+The backend publishes by uploading the `.gpkg` file into GeoServer directly, so GeoServer only needs its own persistent data directory.
 
 ## Apply
 
+Deploy GeoServer:
+
 ```bash
 kubectl apply -k k8s/geoserver -n sw-dev
+```
+
+## Quick checks
+
+```bash
+kubectl get pvc -n sw-dev
+kubectl get pods -n sw-dev -l app=geoserver
+kubectl describe pod -n sw-dev -l app=geoserver
 ```
 
 ## Expected in-cluster address
@@ -54,7 +55,7 @@ http://geoserver.sw-dev.svc.cluster.local
 
 ## Backend settings
 
-The backend should use the in-cluster GeoServer service and the shared `/data` mount:
+The backend should use the in-cluster GeoServer service. A local work directory inside the backend pod is enough:
 
 ```text
 APP_WORK_DIR=/data

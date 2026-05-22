@@ -29,6 +29,26 @@ def _public_geoserver_base() -> str:
     return public_base or "/geoserver"
 
 
+def _delete_datastore_if_exists(client: httpx.Client, workspace: str, store_name: str, headers: dict) -> tuple[bool, str]:
+    """Delete an existing datastore so a GeoPackage upload can recreate it cleanly."""
+    datastore_url = _rest(f"workspaces/{workspace}/datastores/{store_name}.json")
+    resp = client.get(datastore_url, headers=headers)
+    if resp.status_code == 404:
+        return True, ""
+    if resp.status_code != 200:
+        return False, f"Failed to inspect datastore: {resp.status_code} {resp.text[:200]}"
+
+    delete_url = _rest(f"workspaces/{workspace}/datastores/{store_name}")
+    deleted = client.delete(
+        delete_url,
+        headers=headers,
+        params={"recurse": "true", "quietOnNotFound": "true"},
+    )
+    if deleted.status_code not in (200, 202, 404):
+        return False, f"Failed to delete datastore: {deleted.status_code} {deleted.text[:200]}"
+    return True, ""
+
+
 def _read_gpkg_bbox(gpkg_path: Path, table_name: str = "entities") -> tuple[float, float, float, float] | None:
     """Read a layer bbox from GeoPackage metadata."""
     try:
@@ -1041,3 +1061,106 @@ def get_raster_url_v2(layer_name: str) -> str:
         f"&style={style_param}"
         "&TileMatrix=EPSG:900913:{z}&TileRow={y}&TileCol={x}"
     )
+
+
+def publish_gpkg(gpkg_path: Path, store_name: str, layer_name: str, native_layer_name: str = None) -> tuple[bool, str]:
+    """Publish a GeoPackage by uploading it into GeoServer over REST."""
+    try:
+        gpkg_path = Path(gpkg_path).resolve()
+        if not gpkg_path.exists():
+            return False, "GeoPackage file does not exist."
+
+        ok_style, msg_style = ensure_dwg_style()
+        if not ok_style:
+            return False, f"Style creation failed: {msg_style}"
+
+        ws = settings.geoserver_workspace
+        headers = _auth_headers()
+        native_name = native_layer_name or "entities"
+
+        with httpx.Client(timeout=60.0) as client:
+            ok_delete, msg_delete = _delete_datastore_if_exists(client, ws, store_name, headers)
+            if not ok_delete:
+                return False, msg_delete
+
+            upload_url = _rest(f"workspaces/{ws}/datastores/{store_name}/file.gpkg")
+            with gpkg_path.open("rb") as fp:
+                uploaded = client.put(
+                    upload_url,
+                    headers={**headers, "Content-Type": "application/octet-stream"},
+                    params={"configure": "none"},
+                    content=fp.read(),
+                )
+            if uploaded.status_code not in (200, 201):
+                return False, f"Create datastore by upload failed: {uploaded.status_code} {uploaded.text[:300]}"
+
+            featuretypes_url = _rest(f"workspaces/{ws}/datastores/{store_name}/featuretypes.json")
+            featuretype_body = {
+                "featureType": {
+                    "name": layer_name,
+                    "title": layer_name,
+                    "nativeName": native_name,
+                }
+            }
+            created_featuretype = client.post(
+                featuretypes_url,
+                headers={**headers, "Content-Type": "application/json"},
+                json=featuretype_body,
+            )
+            if created_featuretype.status_code not in (200, 201):
+                return False, f"Create featureType failed: {created_featuretype.status_code} {created_featuretype.text[:200]}"
+
+            bbox = _read_gpkg_bbox(gpkg_path, native_name)
+            if bbox:
+                min_x, min_y, max_x, max_y = bbox
+                ft_update_url = _rest(f"workspaces/{ws}/datastores/{store_name}/featuretypes/{layer_name}.json")
+                ft_update_body = {
+                    "featureType": {
+                        "srs": "EPSG:4326",
+                        "projectionPolicy": "FORCE_DECLARED",
+                        "nativeBoundingBox": {
+                            "minx": min_x,
+                            "maxx": max_x,
+                            "miny": min_y,
+                            "maxy": max_y,
+                            "crs": "EPSG:4326",
+                        },
+                        "latLonBoundingBox": {
+                            "minx": min_x,
+                            "maxx": max_x,
+                            "miny": min_y,
+                            "maxy": max_y,
+                            "crs": "EPSG:4326",
+                        },
+                    }
+                }
+                client.put(
+                    ft_update_url,
+                    headers={**headers, "Content-Type": "application/json"},
+                    json=ft_update_body,
+                )
+
+            layer_url = _rest(f"workspaces/{ws}/layers/{layer_name}.json")
+            layer_body = {
+                "layer": {
+                    "styles": {
+                        "style": [
+                            {"name": "dwg_generic_style", "workspace": ws}
+                        ]
+                    }
+                }
+            }
+            client.put(
+                layer_url,
+                headers={**headers, "Content-Type": "application/json"},
+                json=layer_body,
+            )
+
+        ok_gwc, msg_gwc = enable_gwc_mvt(layer_name)
+        if not ok_gwc:
+            return False, f"GWC tile config failed: {msg_gwc}"
+
+        truncate_gwc_layer(layer_name)
+        return True, ""
+    except Exception as e:
+        return False, str(e)

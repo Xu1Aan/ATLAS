@@ -42,9 +42,6 @@ spec:
           volumeMounts:
             - name: geoserver-data
               mountPath: /opt/geoserver/data_dir
-            - name: shared-jobs
-              mountPath: /data
-              readOnly: true
           readinessProbe:
             httpGet:
               path: /geoserver/web/
@@ -72,6 +69,3 @@ spec:
         - name: geoserver-data
           persistentVolumeClaim:
             claimName: geoserver-data
-        - name: shared-jobs
-          persistentVolumeClaim:
-            claimName: dwg2mvt-shared-jobs
