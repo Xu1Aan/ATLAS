@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
-    base: env.VITE_APP_BASE || '/',
+    base: env.VITE_APP_BASE || '/web/dwgconvert/',
     server: {
       host: '0.0.0.0',
       port: 3666,
