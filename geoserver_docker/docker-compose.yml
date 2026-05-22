@@ -12,7 +12,6 @@ services:
       PROXY_BASE_URL: ${GEOSERVER_PUBLIC_URL:-http://localhost:18081/geoserver}
     volumes:
       - geoserver_data:/opt/geoserver/data_dir
-      - ${GEOSERVER_SHARED_JOBS_DIR:-./jobs}:/data:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/geoserver/web/"]
       interval: 20s
