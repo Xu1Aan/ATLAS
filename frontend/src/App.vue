@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import Uploader from './components/Uploader.vue'
+import { onMounted, ref } from 'vue'
 import Map from './components/Map.vue'
+import Uploader from './components/Uploader.vue'
+import { API_BASE } from './config'
 import type { ConvertResult } from './types'
 
 interface Job {
@@ -14,11 +15,11 @@ interface Job {
 const result = ref<ConvertResult | null>(null)
 const error = ref<string | null>(null)
 const jobs = ref<Job[]>([])
-const selectedJobId = ref<string>('')
+const selectedJobId = ref('')
 
 const fetchJobs = async () => {
   try {
-    const res = await fetch('/api/jobs')
+    const res = await fetch(`${API_BASE}/jobs`)
     if (res.ok) {
       jobs.value = await res.json()
     }
@@ -30,24 +31,23 @@ const fetchJobs = async () => {
 const loadJob = async (jobId: string) => {
   if (!jobId) return
   try {
-    const res = await fetch(`/api/convert/${jobId}`)
+    const res = await fetch(`${API_BASE}/convert/${jobId}`)
     if (res.ok) {
-      const data = await res.json()
-      result.value = data
+      result.value = await res.json()
       error.value = null
       selectedJobId.value = jobId
     } else {
       error.value = 'Failed to load job'
     }
   } catch (e) {
-    error.value = 'Error loading job: ' + e
+    error.value = `Error loading job: ${e}`
   }
 }
 
 const onConvert = (res: ConvertResult) => {
   error.value = null
   result.value = res
-  fetchJobs() // Refresh list after upload
+  fetchJobs()
   if (res.job_id) {
     selectedJobId.value = res.job_id
   }
@@ -69,7 +69,7 @@ onMounted(() => {
       <h1 class="app-title">DWG 转切片</h1>
       <div class="header-actions">
         <Uploader
-          api-base="/api"
+          :api-base="API_BASE"
           @convert="onConvert"
           @error="onError"
         />
@@ -85,16 +85,16 @@ onMounted(() => {
       </div>
     </div>
     <p class="app-sub">
-      LibreDWG → DXF → GDAL → GeoPackage → GeoServer MVT / WMTS
+      LibreDWG -> DXF -> GDAL -> GeoPackage -> GeoServer MVT / WMTS
     </p>
   </header>
-  
+
   <div v-if="error" class="app-error">{{ error }}</div>
   <main class="app-main">
     <Map :result="result" />
     <div v-if="result && !result.mvt_url && result.status === 'done'" class="app-hint">
-      转换完成。GeoServer 未返回 MVT 地址时可
-      <a :href="`/api/convert/${result.job_id}/gpkg`" download style="margin-left: 4px">下载 GPKG</a>
+      转换完成，GeoServer 未返回 MVT 地址时可
+      <a :href="`${API_BASE}/convert/${result.job_id}/gpkg`" download style="margin-left: 4px">下载 GPKG</a>
       在 QGIS 等工具中查看，或配置 GeoServer 后重新发布。
     </div>
   </main>

@@ -24,12 +24,9 @@ def _rest(url_path: str) -> str:
 
 
 def _public_geoserver_base() -> str:
-    """Return the browser-facing GeoServer base URL.
-
-    We deliberately use the reverse-proxied relative path so the frontend and
-    GeoServer stay on the same origin and avoid CORS issues.
-    """
-    return "/geoserver"
+    """Return the browser-facing GeoServer base URL."""
+    public_base = (settings.geoserver_public_url or "/geoserver").rstrip("/")
+    return public_base or "/geoserver"
 
 
 def _read_gpkg_bbox(gpkg_path: Path, table_name: str = "entities") -> tuple[float, float, float, float] | None:

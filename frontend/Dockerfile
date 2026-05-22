@@ -3,6 +3,10 @@ ARG NGINX_BASE_IMAGE=docker.m.daocloud.io/library/nginx:1.27-alpine
 FROM ${NODE_BASE_IMAGE} AS build
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG VITE_APP_BASE=/
+ARG VITE_API_BASE=/api
+ENV VITE_APP_BASE=${VITE_APP_BASE}
+ENV VITE_API_BASE=${VITE_API_BASE}
 
 WORKDIR /app
 

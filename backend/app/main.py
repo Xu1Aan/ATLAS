@@ -59,3 +59,18 @@ async def root():
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+@app.get("/actuator/health")
+async def actuator_health():
+    return {"status": "UP"}
+
+
+@app.get("/actuator/health/liveness")
+async def actuator_liveness():
+    return {"status": "UP"}
+
+
+@app.get("/actuator/health/readiness")
+async def actuator_readiness():
+    return {"status": "UP"}

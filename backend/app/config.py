@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     geoserver_user: str = "admin"
     geoserver_password: str = "geoserver"
     geoserver_workspace: str = "dwg"
-    geoserver_public_url: str | None = None
+    geoserver_public_url: str = "/geoserver"
 
     class Config:
         env_prefix = "APP_"
@@ -28,8 +28,4 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         self.work_dir = Path(self.work_dir).resolve()
         self.work_dir.mkdir(parents=True, exist_ok=True)
-        if self.geoserver_public_url is None:
-            self.geoserver_public_url = self.geoserver_url
-
-
 settings = Settings()

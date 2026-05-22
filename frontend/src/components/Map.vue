@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { ConvertResult } from '../types'
+import { API_BASE } from '../config'
 
 const props = defineProps<{
   result: ConvertResult | null
@@ -288,7 +289,7 @@ watch(() => props.result, async (newVal) => {
   // 1. Fetch layers
   if (newVal.job_id) {
     try {
-      const res = await fetch(`/api/layers/${newVal.job_id}`)
+      const res = await fetch(`${API_BASE}/layers/${newVal.job_id}`)
       if (res.ok) {
         const data = await res.json()
         // Backward compatibility: if array of strings, map to objects
