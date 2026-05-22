@@ -17,32 +17,30 @@ pipeline {
 
         HARBOR_REGISTRY = '10.20.124.50:5000'
         HARBOR_PROJECT = 'swhi'
-        HARBOR_CREDENTIALS_ID = '69737d03-6882-4c4a-8c4d-7bb5c8da07c1'
+        HARBOR_CREDENTIALS_ID = '69737d03-6882-4c4d-7bb5c8da07c1'
 
         HELM_CHART_BASE = '/root/app/helm/app'
         SSH_KEY_PATH = '/var/jenkins_home/.ssh/id_rsa'
         REMOTE_USER = 'root'
         REMOTE_HOST = '10.20.124.50'
+        REMOTE_K8S_WORKDIR = '/root/app/k8s/dwg2mvt'
 
         BACKEND_IMAGE_NAME = 'sw-dwg2mvt-backend-v1'
         BACKEND_K8S_NAME = 'sw-dwg2mvt-backend-v1'
         BACKEND_HELM_RELEASE = 'dwg2mvt-backend'
-        BACKEND_APP_PORT = '8000'
 
         PYTHON_BASE_IMAGE = 'docker.m.daocloud.io/library/python:3.11-slim-bookworm'
-        NODE_BASE_IMAGE = 'docker.m.daocloud.io/library/node:20-alpine'
         APT_MIRROR = 'mirrors.aliyun.com'
         PIP_INDEX_URL = 'https://pypi.tuna.tsinghua.edu.cn/simple'
-        NPM_REGISTRY = 'https://registry.npmmirror.com'
         GNU_MIRROR = 'https://mirrors.ustc.edu.cn/gnu'
 
-        FRONTEND_BUILD_IMAGE = 'dwg2mvt-frontend-build'
-        FRONTEND_BUILD_CONTAINER = 'dwg2mvt-frontend-build-tmp'
-        FRONTEND_DIST_DIR = 'frontend-dist'
-        FRONTEND_REMOTE_DIR = '/root/app/static/dwgconvert'
-        FRONTEND_PUBLIC_BASE = '/public/dwgconvert/'
-        FRONTEND_API_BASE = '/public/dwgconvert/api'
+        BACKEND_WORK_DIR = '/data'
+        BACKEND_GEOSERVER_URL = 'http://geoserver.sw-dev.svc.cluster.local/geoserver'
         BACKEND_GEOSERVER_PUBLIC_URL = '/public/dwgconvert/geoserver'
+        BACKEND_GEOSERVER_USER = 'admin'
+        BACKEND_GEOSERVER_PASSWORD = 'geoserver'
+
+        GEOSERVER_MANIFEST_DIR = 'k8s/geoserver'
     }
 
     stages {
@@ -59,30 +57,6 @@ set -eu
 git rev-parse HEAD
 git log -1 --oneline
 '''
-            }
-        }
-
-        stage('Build Frontend Static') {
-            steps {
-                sh """#!/bin/sh
-set -eu
-docker build \\
-  --target build \\
-  --build-arg NODE_BASE_IMAGE=${env.NODE_BASE_IMAGE} \\
-  --build-arg NPM_REGISTRY=${env.NPM_REGISTRY} \\
-  --build-arg VITE_APP_BASE=${env.FRONTEND_PUBLIC_BASE} \\
-  --build-arg VITE_API_BASE=${env.FRONTEND_API_BASE} \\
-  -t ${env.FRONTEND_BUILD_IMAGE} \\
-  ./frontend
-
-docker rm -f ${env.FRONTEND_BUILD_CONTAINER} >/dev/null 2>&1 || true
-rm -rf ${env.FRONTEND_DIST_DIR}
-mkdir -p ${env.FRONTEND_DIST_DIR}
-docker create --name ${env.FRONTEND_BUILD_CONTAINER} ${env.FRONTEND_BUILD_IMAGE} >/dev/null
-docker cp ${env.FRONTEND_BUILD_CONTAINER}:/app/dist/. ${env.FRONTEND_DIST_DIR}/
-docker rm -f ${env.FRONTEND_BUILD_CONTAINER} >/dev/null
-ls -la ${env.FRONTEND_DIST_DIR}
-"""
             }
         }
 
@@ -123,20 +97,10 @@ docker push ${dockerImage}
             }
         }
 
-        stage('Deploy Frontend Static') {
-            steps {
-                sh """#!/bin/sh
-set -eu
-ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.REMOTE_HOST} "rm -rf '${env.FRONTEND_REMOTE_DIR}.tmp' && mkdir -p '${env.FRONTEND_REMOTE_DIR}.tmp'"
-scp -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no -r ${env.FRONTEND_DIST_DIR}/. ${env.REMOTE_USER}@${env.REMOTE_HOST}:${env.FRONTEND_REMOTE_DIR}.tmp/
-ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.REMOTE_HOST} "mkdir -p '${env.FRONTEND_REMOTE_DIR}' && rm -rf '${env.FRONTEND_REMOTE_DIR}'/* && cp -r '${env.FRONTEND_REMOTE_DIR}.tmp'/. '${env.FRONTEND_REMOTE_DIR}'/ && rm -rf '${env.FRONTEND_REMOTE_DIR}.tmp'"
-"""
-            }
-        }
-
         stage('Deploy Backend To K8S') {
             steps {
                 script {
+                    echo '=== Deploy Backend To K8S ==='
                     def sshCommand = "ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.REMOTE_HOST} "
                     def chartPrimary = "${env.HELM_CHART_BASE}/${env.BACKEND_IMAGE_NAME}"
                     def chartFallback = "${env.HELM_CHART_BASE}/sw-dwg2mvt-backend-${env.APP_ENV}"
@@ -148,10 +112,18 @@ ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.
                         ",image.repository=${dockerImage}" +
                         ",image.tag=${envAppVersion}" +
                         ',image.pullPolicy=Always' +
-                        ",service.port=${env.BACKEND_APP_PORT}" +
+                        ",service.port=80" +
                         ",replicaCount=${env.APP_REPLICAS}" +
-                        ",env[0].name=APP_GEOSERVER_PUBLIC_URL" +
-                        ",env[0].value=${env.BACKEND_GEOSERVER_PUBLIC_URL}"
+                        ",env[0].name=APP_WORK_DIR" +
+                        ",env[0].value=${env.BACKEND_WORK_DIR}" +
+                        ",env[1].name=APP_GEOSERVER_URL" +
+                        ",env[1].value=${env.BACKEND_GEOSERVER_URL}" +
+                        ",env[2].name=APP_GEOSERVER_PUBLIC_URL" +
+                        ",env[2].value=${env.BACKEND_GEOSERVER_PUBLIC_URL}" +
+                        ",env[3].name=APP_GEOSERVER_USER" +
+                        ",env[3].value=${env.BACKEND_GEOSERVER_USER}" +
+                        ",env[4].name=APP_GEOSERVER_PASSWORD" +
+                        ",env[4].value=${env.BACKEND_GEOSERVER_PASSWORD}"
 
                     def helmCmdPrimary =
                         'helm upgrade --install ' +
@@ -178,6 +150,23 @@ ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.
                 }
             }
         }
+
+        stage('Deploy GeoServer To K8S') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    sh """#!/bin/sh
+set -eu
+set -x
+echo "=== Deploy GeoServer To K8S ==="
+test -d ${env.WORKSPACE}/${env.GEOSERVER_MANIFEST_DIR}
+ls -la ${env.WORKSPACE}/${env.GEOSERVER_MANIFEST_DIR}
+ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.REMOTE_HOST} "mkdir -p '${env.REMOTE_K8S_WORKDIR}' && rm -rf '${env.REMOTE_K8S_WORKDIR}/geoserver'"
+scp -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no -r ${env.WORKSPACE}/${env.GEOSERVER_MANIFEST_DIR} ${env.REMOTE_USER}@${env.REMOTE_HOST}:${env.REMOTE_K8S_WORKDIR}/geoserver
+ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.REMOTE_HOST} "kubectl apply -k '${env.REMOTE_K8S_WORKDIR}/geoserver' -n ${env.K8S_ENV} && kubectl rollout status deployment/geoserver -n ${env.K8S_ENV} --timeout=300s"
+"""
+                }
+            }
+        }
     }
 
     post {
@@ -186,11 +175,6 @@ ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.
         }
         failure {
             sh 'echo "Failure"'
-        }
-        always {
-            sh """#!/bin/sh
-docker rm -f ${env.FRONTEND_BUILD_CONTAINER} >/dev/null 2>&1 || true
-"""
         }
     }
 }

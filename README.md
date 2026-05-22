@@ -148,3 +148,30 @@ APP_GEOSERVER_PUBLIC_URL=http://your-host:18081/geoserver
 ```
 
 See [DEPLOY_README.md](/E:/project/dwg2mvt/DEPLOY_README.md) for the full deployment and verification flow.
+
+## K8s Deployment
+
+Recommended production topology:
+
+- frontend: manually built and uploaded as static files
+- backend: deployed to Kubernetes
+- geoserver: deployed to Kubernetes
+- backend and geoserver share the same PVC at `/data`
+
+Key backend runtime settings in Kubernetes:
+
+```ini
+APP_WORK_DIR=/data
+APP_GEOSERVER_URL=http://geoserver.sw-dev.svc.cluster.local/geoserver
+APP_GEOSERVER_PUBLIC_URL=/public/dwgconvert/geoserver
+APP_GEOSERVER_USER=admin
+APP_GEOSERVER_PASSWORD=geoserver
+```
+
+Gateway recommendations:
+
+- `/web/dwgconvert/**` -> frontend static resources
+- `/public/dwgconvert/api/**` -> backend service, `stripPrefix: 2`
+- `/public/dwgconvert/geoserver/**` -> geoserver service, `stripPrefix: 2`
+
+GeoServer Kubernetes manifests are provided in [k8s/geoserver](E:/project/dwg2mvt/k8s/geoserver).

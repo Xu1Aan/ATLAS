@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geoserver
+  namespace: sw-dev
+  labels:
+    app: geoserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geoserver
+  template:
+    metadata:
+      labels:
+        app: geoserver
+    spec:
+      containers:
+        - name: geoserver
+          image: docker.osgeo.org/geoserver:2.28.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: GEOSERVER_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: geoserver-secret
+                  key: GEOSERVER_ADMIN_USER
+            - name: GEOSERVER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: geoserver-secret
+                  key: GEOSERVER_ADMIN_PASSWORD
+            - name: INSTALL_EXTENSIONS
+              value: "true"
+            - name: STABLE_EXTENSIONS
+              value: "vectortiles"
+            - name: PROXY_BASE_URL
+              value: "/public/dwgconvert/geoserver"
+          volumeMounts:
+            - name: geoserver-data
+              mountPath: /opt/geoserver/data_dir
+            - name: shared-jobs
+              mountPath: /data
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /geoserver/web/
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /geoserver/web/
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: geoserver-data
+          persistentVolumeClaim:
+            claimName: geoserver-data
+        - name: shared-jobs
+          persistentVolumeClaim:
+            claimName: dwg2mvt-shared-jobs
