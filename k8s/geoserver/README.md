@@ -14,6 +14,8 @@ This directory contains a simple Kubernetes deployment for GeoServer that matche
 - `deployment.yaml`: GeoServer deployment
 - `service.yaml`: ClusterIP service `80 -> 8080`
 - `kustomization.yaml`: convenience manifest set
+- `kustomization.harbor.example.yaml`: example image override for Harbor or another local registry
+- `overlays/harbor/kustomization.yaml`: ready-to-use Harbor overlay
 
 ## Important
 
@@ -28,6 +30,26 @@ Deploy GeoServer:
 ```bash
 kubectl apply -k k8s/geoserver -n sw-dev
 ```
+
+## Image pull acceleration
+
+If cluster nodes are slow to pull `docker.osgeo.org/geoserver:2.28.0`, the best option is to mirror that image into your own Harbor and deploy from the in-network registry.
+
+Example workflow:
+
+1. Sync or retag the image into Harbor.
+2. Update `overlays/harbor/kustomization.yaml` with your actual Harbor image path.
+3. Apply that overlay instead of the default base.
+
+Example:
+
+```bash
+kubectl apply -k k8s/geoserver/overlays/harbor -n sw-dev
+```
+
+If you prefer a registry mirror instead of Harbor, update the image in `deployment.yaml` directly or create a similar Kustomize overlay that rewrites:
+
+`docker.osgeo.org/geoserver:2.28.0`
 
 ## Quick checks
 
