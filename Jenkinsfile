@@ -78,7 +78,13 @@ docker build \\
         stage('Push Backend Image') {
             steps {
                 script {
+                    echo '=== Push Backend Image ==='
                     def dockerImage = "${env.HARBOR_REGISTRY}/${env.HARBOR_PROJECT}/${env.BACKEND_IMAGE_NAME}:${env.APP_ENV}-${env.APP_VERSION}"
+                    sh """#!/bin/sh
+set -eu
+echo "Local image tag: ${env.BACKEND_IMAGE_NAME}:${env.APP_ENV}-${env.APP_VERSION}"
+docker image inspect ${env.BACKEND_IMAGE_NAME}:${env.APP_ENV}-${env.APP_VERSION} >/dev/null
+"""
                     withCredentials([
                         usernamePassword(
                             credentialsId: env.HARBOR_CREDENTIALS_ID,
@@ -86,13 +92,14 @@ docker build \\
                             usernameVariable: 'HARBOR_USERNAME',
                         ),
                     ]) {
-                        sh "docker login ${env.HARBOR_REGISTRY} -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD}"
-                    }
-                    sh """#!/bin/sh
-set -eu
+                        sh """#!/bin/sh
+set -eux
+echo "Target registry image: ${dockerImage}"
+docker login ${env.HARBOR_REGISTRY} -u "${HARBOR_USERNAME}" -p "${HARBOR_PASSWORD}"
 docker tag ${env.BACKEND_IMAGE_NAME}:${env.APP_ENV}-${env.APP_VERSION} ${dockerImage}
 docker push ${dockerImage}
 """
+                    }
                 }
             }
         }
