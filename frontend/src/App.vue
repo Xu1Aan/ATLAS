@@ -66,17 +66,13 @@ onMounted(() => {
 <template>
   <header class="app-header">
     <div class="header-top">
-      <h1 class="app-title">DWG 转切片</h1>
+      <h1 class="app-title">图纸切片发布</h1>
       <div class="header-actions">
-        <Uploader
-          :api-base="API_BASE"
-          @convert="onConvert"
-          @error="onError"
-        />
+        <Uploader :api-base="API_BASE" @convert="onConvert" @error="onError" />
         <div class="job-selector" v-if="jobs.length > 0">
           <label>已上传：</label>
           <select v-model="selectedJobId" @change="loadJob(selectedJobId)">
-            <option value="" disabled>选择图纸...</option>
+            <option value="" disabled>选择任务...</option>
             <option v-for="job in jobs" :key="job.job_id" :value="job.job_id">
               {{ job.filename }} ({{ new Date(job.created_at * 1000).toLocaleString() }})
             </option>
@@ -85,7 +81,7 @@ onMounted(() => {
       </div>
     </div>
     <p class="app-sub">
-      LibreDWG -> DXF -> GDAL -> GeoPackage -> GeoServer MVT / WMTS
+      支持 DWG / DXF / SHP(zip) / KML 上传，统一转换为 GeoPackage 并发布到 GeoServer MVT / WMTS
     </p>
   </header>
 
@@ -93,9 +89,9 @@ onMounted(() => {
   <main class="app-main">
     <Map :result="result" />
     <div v-if="result && !result.mvt_url && result.status === 'done'" class="app-hint">
-      转换完成，GeoServer 未返回 MVT 地址时可
+      转换完成，但 GeoServer 暂未返回 MVT 地址。
       <a :href="`${API_BASE}/convert/${result.job_id}/gpkg`" download style="margin-left: 4px">下载 GPKG</a>
-      在 QGIS 等工具中查看，或配置 GeoServer 后重新发布。
+      后可在 QGIS 等工具中查看，或在 GeoServer 配置完成后重新发布。
     </div>
   </main>
 </template>

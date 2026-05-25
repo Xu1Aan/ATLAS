@@ -10,6 +10,7 @@ import time
 import struct
 from pathlib import Path
 import math
+import zipfile
 
 from app.config import settings
 
@@ -1768,3 +1769,233 @@ def get_gpkg_layers(gpkg_path: Path) -> list[dict]:
     except Exception as e:
         print(f"Error getting layers: {e}")
         return []
+
+
+def _ogrinfo_layer_names(source_path: Path) -> list[str]:
+    ok, out = _run(["ogrinfo", "-ro", "-so", str(source_path)])
+    if not ok:
+        return []
+
+    layer_names: list[str] = []
+    for line in out.splitlines():
+        match = re.match(r"^\s*\d+:\s+(.+?)\s+\(", line)
+        if match:
+            layer_names.append(match.group(1).strip())
+    return layer_names
+
+
+def _ogr_layer_has_declared_srs(source_path: Path, layer_name: str) -> bool:
+    ok, out = _run(["ogrinfo", "-ro", "-so", str(source_path), layer_name])
+    if not ok:
+        return False
+
+    lowered = out.lower()
+    if "layer srs wkt:" not in lowered:
+        return False
+    return "unknown" not in lowered and "(unknown)" not in lowered
+
+
+def _convert_vector_to_gpkg(
+    source_path: Path,
+    output_dir: Path,
+    progress_callback=None,
+    source_label: str = "矢量",
+    require_source_srs: bool = False,
+) -> tuple[bool, Path | None, str]:
+    gpkg_path = output_dir / "source.gpkg"
+    source_path = Path(source_path)
+
+    if progress_callback:
+        progress_callback(10, f"姝ｅ湪鍒濆鍖?{source_label} 鏂囦欢...")
+
+    layer_names = _ogrinfo_layer_names(source_path)
+    if not layer_names:
+        return False, None, f"鏃犳硶璇嗗埆 {source_label} 涓殑鍥惧眰"
+
+    if require_source_srs:
+        missing_srs = [layer for layer in layer_names if not _ogr_layer_has_declared_srs(source_path, layer)]
+        if missing_srs:
+            return False, None, f"{source_label} 缂哄皯鍙敤鍧愭爣绯讳俊鎭? {', '.join(missing_srs)}"
+
+    if gpkg_path.exists():
+        try:
+            gpkg_path.unlink()
+        except Exception as e:
+            return False, None, f"Failed to remove existing GPKG: {e}"
+
+    if progress_callback:
+        progress_callback(60, f"姝ｅ湪灏?{source_label} 杞崲涓?GeoPackage...")
+
+    cmd = [
+        settings.ogr2ogr_cmd,
+        "-f", "GPKG",
+        str(gpkg_path),
+    ]
+    if source_path.suffix.lower() == ".dxf":
+        cmd.extend([
+            "--config", "DXF_ENCODING", "UTF-8",
+            "--config", "DXF_MERGE_BLOCK_GEOMETRIES", "FALSE",
+            "--config", "DXF_INLINE_BLOCKS", "TRUE",
+            "--config", "DXF_ATTRIBUTES", "TRUE",
+        ])
+    cmd.extend([
+        str(source_path),
+        "-skipfailures",
+        "-t_srs", settings.target_srs,
+        "-lco", "GEOMETRY_NAME=geom",
+    ])
+    ok, err = _run(cmd, cwd=output_dir, timeout=3600)
+    if not ok:
+        return False, None, f"GDAL conversion failed: {err}"
+
+    if progress_callback:
+        progress_callback(100, "杞崲瀹屾垚")
+    return True, gpkg_path, ""
+
+
+def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    target_dxf = output_dir / "source.dxf"
+
+    if progress_callback:
+        progress_callback(10, "姝ｅ湪鍒濆鍖?..")
+
+    try:
+        if dxf_path.resolve() != target_dxf.resolve():
+            shutil.copy2(dxf_path, target_dxf)
+    except Exception as e:
+        return False, None, f"澶嶅埗 DXF 鏂囦欢澶辫触: {e}"
+
+    try:
+        repair_dxf_encoding(target_dxf)
+    except Exception as e:
+        print(f"Encoding repair warning: {e}")
+
+    return _convert_vector_to_gpkg(target_dxf, output_dir, progress_callback=progress_callback, source_label="DXF")
+
+
+def convert_kml_to_gpkg(kml_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    return _convert_vector_to_gpkg(kml_path, output_dir, progress_callback=progress_callback, source_label="KML")
+
+
+def _extract_zip_file(zip_path: Path, output_dir: Path) -> tuple[bool, Path | None, str]:
+    extract_dir = output_dir / "extract"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir, ignore_errors=True)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            root_dir = extract_dir.resolve()
+            for member in archive.infolist():
+                member_path = (extract_dir / member.filename).resolve()
+                if root_dir not in member_path.parents and member_path != root_dir:
+                    return False, None, "ZIP contains invalid paths"
+            archive.extractall(extract_dir)
+        return True, extract_dir, ""
+    except zipfile.BadZipFile:
+        return False, None, "ZIP file is invalid"
+    except Exception as e:
+        return False, None, f"瑙ｅ帇 ZIP 澶辫触: {e}"
+
+
+def _find_shp_main_file(extract_dir: Path, zip_path: Path) -> tuple[Path | None, str]:
+    shp_files = sorted(extract_dir.rglob("*.shp"))
+    if not shp_files:
+        return None, "ZIP 鍐呮湭鎵惧埌 .shp 鏂囦欢"
+
+    zip_stem = zip_path.stem.lower()
+    matches = [path for path in shp_files if path.stem.lower() == zip_stem]
+    candidates = matches or shp_files
+    if len(candidates) > 1:
+        return None, "ZIP 鍐呭寘鍚涓?SHP 鏂囦欢锛岃淇濈暀涓€涓富鍥惧眰"
+
+    shp_path = candidates[0]
+    required_suffixes = [".shp", ".shx", ".dbf"]
+    missing = [suffix for suffix in required_suffixes if not shp_path.with_suffix(suffix).exists()]
+    if missing:
+        return None, f"SHP 缂哄皯蹇呰鏂囦欢: {', '.join(missing)}"
+    if not shp_path.with_suffix(".prj").exists():
+        return None, "SHP 缂哄皯 .prj 锛屾棤娉曡瘑鍒潗鏍囩郴"
+
+    return shp_path, ""
+
+
+def convert_shp_zip_to_gpkg(zip_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    if progress_callback:
+        progress_callback(10, "姝ｅ湪瑙ｅ帇 SHP ZIP...")
+
+    ok, extract_dir, err = _extract_zip_file(zip_path, output_dir)
+    if not ok or not extract_dir:
+        return False, None, err
+
+    shp_path, shp_err = _find_shp_main_file(extract_dir, zip_path)
+    if not shp_path:
+        return False, None, shp_err
+
+    return _convert_vector_to_gpkg(
+        shp_path,
+        output_dir,
+        progress_callback=progress_callback,
+        source_label="SHP",
+        require_source_srs=True,
+    )
+
+
+def get_gpkg_feature_layers(gpkg_path: Path) -> list[str]:
+    try:
+        conn = sqlite3.connect(gpkg_path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT c.table_name
+                FROM gpkg_contents c
+                JOIN gpkg_geometry_columns g ON g.table_name = c.table_name
+                WHERE c.data_type = 'features'
+                ORDER BY c.table_name
+                """
+            )
+            rows = [row[0] for row in cur.fetchall() if row and row[0]]
+        finally:
+            conn.close()
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    return _ogrinfo_layer_names(gpkg_path)
+
+
+def get_gpkg_bbox(gpkg_path: Path, table_name: str = "entities") -> tuple[bool, list[float] | None]:
+    try:
+        conn = sqlite3.connect(gpkg_path)
+        c = conn.cursor()
+        c.execute(
+            "SELECT min_x, min_y, max_x, max_y FROM gpkg_contents WHERE table_name=?",
+            (table_name,),
+        )
+        row = c.fetchone()
+        conn.close()
+        if row and all(x is not None for x in row):
+            bbox = [float(x) for x in row]
+            if bbox[0] < bbox[2] and bbox[1] < bbox[3]:
+                return True, bbox
+    except Exception:
+        pass
+
+    try:
+        ok, out = _run(["ogrinfo", "-ro", "-so", str(gpkg_path), table_name])
+        if not ok:
+            return False, None
+        match = re.search(
+            r"Extent:\s*\(([-0-9.eE+]+),\s*([-0-9.eE+]+)\)\s*-\s*\(([-0-9.eE+]+),\s*([-0-9.eE+]+)\)",
+            out,
+        )
+        if not match:
+            return False, None
+        min_x, min_y, max_x, max_y = [float(v) for v in match.groups()]
+        if min_x < max_x and min_y < max_y:
+            return True, [min_x, min_y, max_x, max_y]
+        return False, None
+    except Exception:
+        return False, None

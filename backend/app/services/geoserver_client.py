@@ -1164,3 +1164,165 @@ def publish_gpkg(gpkg_path: Path, store_name: str, layer_name: str, native_layer
         return True, ""
     except Exception as e:
         return False, str(e)
+
+
+def list_gpkg_feature_layers(gpkg_path: Path) -> list[str]:
+    """Return GeoPackage feature layer names."""
+    try:
+        conn = sqlite3.connect(str(gpkg_path))
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT c.table_name
+                FROM gpkg_contents c
+                JOIN gpkg_geometry_columns g ON g.table_name = c.table_name
+                WHERE c.data_type = 'features'
+                ORDER BY c.table_name
+                """
+            )
+            rows = [row[0] for row in cur.fetchall() if row and row[0]]
+        finally:
+            conn.close()
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    return []
+
+
+def publish_gpkg_layers(
+    gpkg_path: Path,
+    store_name: str,
+    layer_specs: list[dict[str, str]],
+) -> tuple[bool, list[dict], str]:
+    """Upload a GeoPackage once and publish multiple feature layers."""
+    try:
+        gpkg_path = Path(gpkg_path).resolve()
+        if not gpkg_path.exists():
+            return False, [], "GeoPackage file does not exist."
+        if not layer_specs:
+            return False, [], "No feature layers found in GeoPackage."
+
+        ok_style, msg_style = ensure_dwg_style()
+        if not ok_style:
+            return False, [], f"Style creation failed: {msg_style}"
+
+        ws = settings.geoserver_workspace
+        headers = _auth_headers()
+        published_layers: list[dict] = []
+
+        with httpx.Client(timeout=60.0) as client:
+            ok_delete, msg_delete = _delete_datastore_if_exists(client, ws, store_name, headers)
+            if not ok_delete:
+                return False, [], msg_delete
+
+            upload_url = _rest(f"workspaces/{ws}/datastores/{store_name}/file.gpkg")
+            with gpkg_path.open("rb") as fp:
+                uploaded = client.put(
+                    upload_url,
+                    headers={**headers, "Content-Type": "application/octet-stream"},
+                    params={"configure": "none"},
+                    content=fp.read(),
+                )
+            if uploaded.status_code not in (200, 201):
+                return False, [], f"Create datastore by upload failed: {uploaded.status_code} {uploaded.text[:300]}"
+
+            featuretypes_url = _rest(f"workspaces/{ws}/datastores/{store_name}/featuretypes.json")
+            for spec in layer_specs:
+                layer_name = spec["layer_name"]
+                native_name = spec["native_layer_name"]
+                featuretype_body = {
+                    "featureType": {
+                        "name": layer_name,
+                        "title": layer_name,
+                        "nativeName": native_name,
+                    }
+                }
+                created_featuretype = client.post(
+                    featuretypes_url,
+                    headers={**headers, "Content-Type": "application/json"},
+                    json=featuretype_body,
+                )
+                if created_featuretype.status_code not in (200, 201):
+                    return False, [], (
+                        f"Create featureType failed for {native_name}: "
+                        f"{created_featuretype.status_code} {created_featuretype.text[:200]}"
+                    )
+
+                bbox = _read_gpkg_bbox(gpkg_path, native_name)
+                if bbox:
+                    min_x, min_y, max_x, max_y = bbox
+                    ft_update_url = _rest(f"workspaces/{ws}/datastores/{store_name}/featuretypes/{layer_name}.json")
+                    ft_update_body = {
+                        "featureType": {
+                            "srs": "EPSG:4326",
+                            "projectionPolicy": "FORCE_DECLARED",
+                            "nativeBoundingBox": {
+                                "minx": min_x,
+                                "maxx": max_x,
+                                "miny": min_y,
+                                "maxy": max_y,
+                                "crs": "EPSG:4326",
+                            },
+                            "latLonBoundingBox": {
+                                "minx": min_x,
+                                "maxx": max_x,
+                                "miny": min_y,
+                                "maxy": max_y,
+                                "crs": "EPSG:4326",
+                            },
+                        }
+                    }
+                    client.put(
+                        ft_update_url,
+                        headers={**headers, "Content-Type": "application/json"},
+                        json=ft_update_body,
+                    )
+
+                layer_url = _rest(f"workspaces/{ws}/layers/{layer_name}.json")
+                layer_body = {
+                    "layer": {
+                        "styles": {
+                            "style": [
+                                {"name": "dwg_generic_style", "workspace": ws}
+                            ]
+                        }
+                    }
+                }
+                client.put(
+                    layer_url,
+                    headers={**headers, "Content-Type": "application/json"},
+                    json=layer_body,
+                )
+
+                ok_gwc, msg_gwc = enable_gwc_mvt(layer_name)
+                if not ok_gwc:
+                    return False, [], f"GWC tile config failed for {layer_name}: {msg_gwc}"
+                add_raster_style_to_layer(layer_name)
+                truncate_gwc_layer(layer_name)
+
+                published_layers.append(
+                    {
+                        "layer_name": layer_name,
+                        "native_layer_name": native_name,
+                        "mvt_url": get_mvt_url(layer_name),
+                        "raster_url": get_raster_url_v2(layer_name),
+                        "bbox": list(bbox) if bbox else None,
+                    }
+                )
+
+        return True, published_layers, ""
+    except Exception as e:
+        return False, [], str(e)
+
+
+def publish_gpkg(gpkg_path: Path, store_name: str, layer_name: str, native_layer_name: str = None) -> tuple[bool, str]:
+    """Publish a single GeoPackage feature layer over the shared multi-layer uploader."""
+    ok, _layers, err = publish_gpkg_layers(
+        gpkg_path,
+        store_name,
+        [{"layer_name": layer_name, "native_layer_name": native_layer_name or "entities"}],
+    )
+    return ok, err
