@@ -180,7 +180,6 @@ docker push ${remoteImage}
                     }
                 }
             }
-            }
         }
     }
 
