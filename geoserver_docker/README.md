@@ -11,11 +11,15 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-## Default URL
+If this GeoServer runs on `10.20.124.71`, keep the default:
 
 ```text
-http://localhost:18081/geoserver
+GEOSERVER_PUBLIC_URL=http://10.20.124.71:18081/geoserver
 ```
+
+## Default URL
+
+`http://10.20.124.71:18081/geoserver`
 
 ## Notes
 
@@ -28,8 +32,8 @@ http://localhost:18081/geoserver
 If your backend should talk to this standalone GeoServer:
 
 ```text
-APP_GEOSERVER_URL=http://<docker-host>:18081/geoserver
-APP_GEOSERVER_PUBLIC_URL=http://<docker-host>:18081/geoserver
+APP_GEOSERVER_URL=http://10.20.124.71:18081/geoserver
+APP_GEOSERVER_PUBLIC_URL=http://10.20.124.71:18081/geoserver
 APP_GEOSERVER_USER=admin
 APP_GEOSERVER_PASSWORD=geoserver
 ```

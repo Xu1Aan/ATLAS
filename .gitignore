@@ -27,4 +27,4 @@ backend/tools/
 *.gpkg
 *.dwg
 *.dxf
-.env
+# .env
