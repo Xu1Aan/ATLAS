@@ -43,8 +43,6 @@ pipeline {
         BACKEND_GEOSERVER_PUBLIC_URL = 'http://10.20.124.71:18081/geoserver'
         BACKEND_GEOSERVER_USER = 'admin'
         BACKEND_GEOSERVER_PASSWORD = 'geoserver'
-
-        GEOSERVER_MANIFEST_DIR = 'k8s/geoserver'
     }
 
     stages {
@@ -182,25 +180,6 @@ docker push ${remoteImage}
                     }
                 }
             }
-        }
-
-        stage('Deploy GeoServer To K8S') {
-            steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    script {
-                        def sshCommand = "ssh -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no ${env.REMOTE_USER}@${env.REMOTE_HOST} "
-                        sh """#!/bin/sh
-set -eux
-echo "=== Deploy GeoServer To K8S ==="
-test -d ${env.WORKSPACE}/${env.GEOSERVER_MANIFEST_DIR}
-ls -la ${env.WORKSPACE}/${env.GEOSERVER_MANIFEST_DIR}
-${sshCommand} "mkdir -p '${env.REMOTE_K8S_WORKDIR}' && rm -rf '${env.REMOTE_K8S_WORKDIR}/geoserver'"
-scp -i ${env.SSH_KEY_PATH} -o StrictHostKeyChecking=no -r ${env.WORKSPACE}/${env.GEOSERVER_MANIFEST_DIR} ${env.REMOTE_USER}@${env.REMOTE_HOST}:${env.REMOTE_K8S_WORKDIR}/geoserver
-${sshCommand} "kubectl apply -k '${env.REMOTE_K8S_WORKDIR}/geoserver' -n ${env.K8S_ENV}"
-${sshCommand} "kubectl rollout status deployment/geoserver -n ${env.K8S_ENV} --timeout=300s || (kubectl get pods -n ${env.K8S_ENV} -l app=geoserver -o wide; kubectl describe deployment geoserver -n ${env.K8S_ENV}; kubectl describe pods -n ${env.K8S_ENV} -l app=geoserver; kubectl get events -n ${env.K8S_ENV} --sort-by=.metadata.creationTimestamp | tail -n 50; kubectl logs -n ${env.K8S_ENV} -l app=geoserver --tail=200 || true; exit 1)"
-"""
-                    }
-                }
             }
         }
     }
