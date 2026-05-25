@@ -1809,6 +1809,8 @@ def _convert_vector_to_gpkg(
         progress_callback(10, f"姝ｅ湪鍒濆鍖?{source_label} 鏂囦欢...")
 
     layer_names = _ogrinfo_layer_names(source_path)
+    if not layer_names and source_path.suffix.lower() == ".dxf":
+        layer_names = ["entities"]
     if not layer_names:
         return False, None, f"鏃犳硶璇嗗埆 {source_label} 涓殑鍥惧眰"
 
