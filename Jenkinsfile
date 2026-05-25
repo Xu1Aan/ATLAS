@@ -39,8 +39,8 @@ pipeline {
         BACKEND_CHART_FALLBACK = 'sw-dwg2mvt-backend-dev'
 
         BACKEND_WORK_DIR = '/data'
-        BACKEND_GEOSERVER_URL = 'http://geoserver.sw-dev.svc.cluster.local/geoserver'
-        BACKEND_GEOSERVER_PUBLIC_URL = '/public/dwgconvert/geoserver'
+        BACKEND_GEOSERVER_URL = 'http://10.20.124.50:18081/geoserver'
+        BACKEND_GEOSERVER_PUBLIC_URL = 'http://10.20.124.50:18081/geoserver'
         BACKEND_GEOSERVER_USER = 'admin'
         BACKEND_GEOSERVER_PASSWORD = 'geoserver'
 
