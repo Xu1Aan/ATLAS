@@ -16,5 +16,6 @@ RUN wget -c https://sourceforge.net/projects/geoserver/files/GeoServer/2.28.0/ex
     unzip /tmp/vectortiles.zip -d "${GS_LIB_DIR}" && \
     rm /tmp/vectortiles.zip
 
-# Switch back to geoserver user
-USER geoserver
+# Keep the image on the base image's default runtime user.
+# Some GeoServer images do not define a `geoserver` passwd entry, so forcing
+# `USER geoserver` breaks container startup.
