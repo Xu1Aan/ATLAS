@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     target_srs: str = "EPSG:4326"
     gauss_kruger_zone: int | None = None
     enable_gauss_kruger_transform: bool = True
-    geoserver_url: str = "http://localhost:18081/geoserver"
+    geoserver_url: str = "http://10.20.124.71:18081/geoserver"
     geoserver_user: str = "admin"
     geoserver_password: str = "geoserver"
     geoserver_workspace: str = "dwg"
-    geoserver_public_url: str = "/geoserver"
+    geoserver_public_url: str = "http://10.20.124.71:18081/geoserver"
 
     class Config:
         env_prefix = "APP_"
