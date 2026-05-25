@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     geoserver_user: str = "admin"
     geoserver_password: str = "geoserver"
     geoserver_workspace: str = "dwg"
-    geoserver_public_url: str = "http://10.20.124.71:18081/geoserver"
+    geoserver_public_url: str = "http://10.20.124.50:30030/public/dwgconvert/geoserver"
 
     class Config:
         env_prefix = "APP_"

@@ -40,7 +40,7 @@ pipeline {
 
         BACKEND_WORK_DIR = '/data'
         BACKEND_GEOSERVER_URL = 'http://10.20.124.71:18081/geoserver'
-        BACKEND_GEOSERVER_PUBLIC_URL = 'http://10.20.124.71:18081/geoserver'
+        BACKEND_GEOSERVER_PUBLIC_URL = 'http://10.20.124.50:30030/public/dwgconvert/geoserver'
         BACKEND_GEOSERVER_USER = 'admin'
         BACKEND_GEOSERVER_PASSWORD = 'geoserver'
     }

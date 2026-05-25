@@ -162,7 +162,7 @@ Key backend runtime settings:
 ```ini
 APP_WORK_DIR=/data
 APP_GEOSERVER_URL=http://10.20.124.71:18081/geoserver
-APP_GEOSERVER_PUBLIC_URL=http://10.20.124.71:18081/geoserver
+APP_GEOSERVER_PUBLIC_URL=http://10.20.124.50:30030/public/dwgconvert/geoserver
 APP_GEOSERVER_USER=admin
 APP_GEOSERVER_PASSWORD=geoserver
 ```
