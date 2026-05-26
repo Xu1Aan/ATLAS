@@ -2565,18 +2565,215 @@ def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None
     if not ok or not target_dxf:
         return False, None, err
 
+    gpkg_path = output_dir / "source.gpkg"
+
     try:
         repair_dxf_encoding(target_dxf)
-    except Exception as e:
-        print(f"Encoding repair warning: {e}")
+    except Exception as exc:
+        print(f"Encoding repair warning: {exc}")
 
-    return _convert_vector_to_gpkg_safe(
-        target_dxf,
-        output_dir,
-        progress_callback=progress_callback,
-        source_label="DXF",
-        probe_layers=False,
-    )
+    if progress_callback:
+        progress_callback(40, "正在解析 DXF 图层...")
+    layer_colors = parse_dxf_layers(target_dxf)
+
+    if progress_callback:
+        progress_callback(55, "正在转换 DXF 到 GeoPackage...")
+
+    cmd_gpkg = [
+        settings.ogr2ogr_cmd,
+        "--config", "DXF_ENCODING", "UTF-8",
+        "--config", "DXF_MERGE_BLOCK_GEOMETRIES", "FALSE",
+        "--config", "DXF_INLINE_BLOCKS", "TRUE",
+        "--config", "DXF_ATTRIBUTES", "TRUE",
+        "-f", "GPKG",
+        str(gpkg_path),
+        str(target_dxf),
+        "-skipfailures",
+        "-lco", "GEOMETRY_NAME=geom",
+    ]
+
+    if settings.enable_gauss_kruger_transform:
+        zone = settings.gauss_kruger_zone or 39
+        central_meridian = zone * 3
+        false_easting = zone * 1000000 + 500000
+        dxf_extent = _get_dxf_extent(target_dxf)
+        if dxf_extent:
+            min_x, _, max_x, _ = dxf_extent
+            if max(abs(min_x), abs(max_x)) < 1000000:
+                false_easting = 500000
+        source_srs = (
+            f"+proj=tmerc +lat_0=0 +lon_0={central_meridian} +k=0.9996 "
+            f"+x_0={false_easting} +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+        cmd_gpkg.extend(["-s_srs", source_srs, "-t_srs", "EPSG:4326"])
+
+    if gpkg_path.exists():
+        try:
+            gpkg_path.unlink()
+        except Exception as exc:
+            return False, None, f"删除已有 GeoPackage 失败: {exc}"
+
+    ok, err = _run(cmd_gpkg, cwd=output_dir, timeout=3600)
+    count = check_gpkg_count(gpkg_path)
+    if ok and count < 500:
+        gpkg_backup = gpkg_path.with_suffix(".gpkg.bak")
+        try:
+            shutil.copy2(gpkg_path, gpkg_backup)
+        except Exception:
+            gpkg_backup = None
+
+        cmd_retry = list(cmd_gpkg)
+        for index, arg in enumerate(cmd_retry):
+            if arg == "DXF_INLINE_BLOCKS":
+                cmd_retry[index + 1] = "FALSE"
+
+        ok_retry, err_retry = _run(cmd_retry, cwd=output_dir, timeout=3600)
+        count_retry = check_gpkg_count(gpkg_path)
+        if ok_retry and count_retry > count:
+            ok = ok_retry
+            err = err_retry
+        elif gpkg_backup and gpkg_backup.exists():
+            try:
+                shutil.move(gpkg_backup, gpkg_path)
+            except Exception:
+                pass
+
+    if not ok:
+        return False, None, f"GDAL 转换失败: {err}"
+
+    if progress_callback:
+        progress_callback(72, "正在补齐 DXF 属性字段...")
+    try:
+        conn = sqlite3.connect(gpkg_path)
+        conn.text_factory = lambda b: b.decode(errors="ignore")
+
+        def mock_bool(*args):
+            return 0
+
+        def mock_float(*args):
+            return 0.0
+
+        def mock_str(*args):
+            return ""
+
+        conn.create_function("ST_IsEmpty", 1, mock_bool)
+        conn.create_function("ST_MinX", 1, mock_float)
+        conn.create_function("ST_MaxX", 1, mock_float)
+        conn.create_function("ST_MinY", 1, mock_float)
+        conn.create_function("ST_MaxY", 1, mock_float)
+        conn.create_function("ST_GeometryType", 1, mock_str)
+        c = conn.cursor()
+
+        try:
+            c.execute("CREATE INDEX IF NOT EXISTS idx_entities_handle ON entities(EntityHandle)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_entities_layer ON entities(Layer)")
+        except Exception:
+            pass
+
+        c.execute("PRAGMA table_info(entities)")
+        cols = [row[1] for row in c.fetchall()]
+        required_columns = {
+            "line_color": "TEXT",
+            "fill_color": "TEXT",
+            "rotation": "REAL",
+            "line_width": "REAL",
+            "text_font": "TEXT",
+            "text_size": "REAL",
+            "text_color": "TEXT",
+            "text_angle": "REAL",
+            "text_content": "TEXT",
+            "anchor_x": "REAL",
+            "anchor_y": "REAL",
+        }
+        for col_name, col_type in required_columns.items():
+            if col_name not in cols:
+                c.execute(f"ALTER TABLE entities ADD COLUMN {col_name} {col_type}")
+
+        attrs_map = extract_dxf_attributes(target_dxf)
+        if attrs_map:
+            anchors = []
+            sizes = []
+            rotations = []
+            text_colors = []
+            line_colors = []
+            fill_colors = []
+            line_widths = []
+            full_texts = []
+
+            for handle, data in attrs_map.items():
+                if "ax" in data:
+                    anchors.append((data["ax"], data["ay"], handle))
+                if "h" in data and data["h"] > 0:
+                    sizes.append((data["h"], handle))
+                if "r" in data:
+                    rotations.append((data["r"], handle))
+                if "t" in data:
+                    full_texts.append((data["t"], handle))
+
+                color = data.get("c")
+                if not color and data.get("layer") in layer_colors:
+                    color = layer_colors[data["layer"]]
+                if color:
+                    if color == "#000000":
+                        color = "#FFFFFF"
+                    if data.get("type") in ("TEXT", "MTEXT"):
+                        text_colors.append((color, handle))
+                    else:
+                        line_colors.append((color, handle))
+
+                fill = data.get("fill")
+                if not fill and data.get("type") in ("HATCH", "SOLID", "TRACE") and color:
+                    fill = color
+                if fill:
+                    if fill == "#000000":
+                        fill = "#FFFFFF"
+                    fill_colors.append((fill, handle))
+
+                if "lw" in data:
+                    line_widths.append((data["lw"], handle))
+
+            if anchors:
+                c.executemany("UPDATE entities SET anchor_x=?, anchor_y=? WHERE EntityHandle=?", anchors)
+            if sizes:
+                c.executemany("UPDATE entities SET text_size=? WHERE EntityHandle=?", sizes)
+            if rotations:
+                c.executemany("UPDATE entities SET text_angle=? WHERE EntityHandle=?", rotations)
+                c.executemany("UPDATE entities SET rotation=COALESCE(rotation, ?) WHERE EntityHandle=?", rotations)
+            if text_colors:
+                c.executemany("UPDATE entities SET text_color=? WHERE EntityHandle=?", text_colors)
+            if line_colors:
+                c.executemany("UPDATE entities SET line_color=? WHERE EntityHandle=?", line_colors)
+            if fill_colors:
+                c.executemany("UPDATE entities SET fill_color=? WHERE EntityHandle=?", fill_colors)
+            if line_widths:
+                c.executemany("UPDATE entities SET line_width=? WHERE EntityHandle=?", line_widths)
+            if full_texts:
+                if "Text" in cols:
+                    c.executemany("UPDATE entities SET Text=? WHERE EntityHandle=?", full_texts)
+                c.executemany("UPDATE entities SET text_content=? WHERE EntityHandle=?", full_texts)
+
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        print(f"Post-processing error: {exc}")
+
+    if progress_callback:
+        progress_callback(85, "正在清理坐标和几何...")
+    try:
+        sanitize_coordinates(gpkg_path)
+    except Exception as exc:
+        print(f"Sanitization warning: {exc}")
+
+    try:
+        if progress_callback:
+            progress_callback(95, "正在重新打包 GeoPackage...")
+        repack_gpkg(gpkg_path)
+    except Exception as exc:
+        print(f"Repack warning: {exc}")
+
+    if progress_callback:
+        progress_callback(100, "转换完成")
+    return True, gpkg_path, ""
 
 
 def convert_kml_to_gpkg(kml_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:

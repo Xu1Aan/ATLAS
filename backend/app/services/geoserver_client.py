@@ -1194,6 +1194,37 @@ def list_gpkg_feature_layers(gpkg_path: Path) -> list[str]:
     return []
 
 
+RASTER_STYLE_REQUIRED_COLUMNS = {
+    "anchor_x",
+    "anchor_y",
+    "text_content",
+    "text_size",
+    "text_angle",
+    "line_color",
+    "fill_color",
+    "line_width",
+}
+
+
+def _get_gpkg_layer_columns(gpkg_path: Path, table_name: str) -> set[str]:
+    try:
+        conn = sqlite3.connect(str(gpkg_path))
+        try:
+            cur = conn.cursor()
+            cur.execute(f'PRAGMA table_info("{table_name}")')
+            return {row[1] for row in cur.fetchall() if row and row[1]}
+        finally:
+            conn.close()
+    except Exception:
+        return set()
+
+
+def get_raster_style_compatibility(gpkg_path: Path, table_name: str) -> tuple[bool, list[str]]:
+    columns = _get_gpkg_layer_columns(gpkg_path, table_name)
+    missing = sorted(RASTER_STYLE_REQUIRED_COLUMNS - columns)
+    return not missing, missing
+
+
 def publish_gpkg_layers(
     gpkg_path: Path,
     store_name: str,
@@ -1210,13 +1241,11 @@ def publish_gpkg_layers(
         ok_style, msg_style = ensure_dwg_style()
         if not ok_style:
             return False, [], f"Style creation failed: {msg_style}"
-        ok_raster_style, msg_raster_style = ensure_dwg_raster_style()
-        if not ok_raster_style:
-            return False, [], f"Raster style creation failed: {msg_raster_style}"
 
         ws = settings.geoserver_workspace
         headers = _auth_headers()
         published_layers: list[dict] = []
+        raster_style_ready = False
 
         with httpx.Client(timeout=60.0) as client:
             ok_delete, msg_delete = _delete_datastore_if_exists(client, ws, store_name, headers)
@@ -1302,9 +1331,25 @@ def publish_gpkg_layers(
                     json=layer_body,
                 )
 
-                ok_style_attach, msg_style_attach = add_raster_style_to_layer(layer_name)
-                if not ok_style_attach:
-                    return False, [], f"Attach raster style failed for {layer_name}: {msg_style_attach}"
+                raster_enabled, missing_columns = get_raster_style_compatibility(gpkg_path, native_name)
+                raster_url = None
+                raster_message = None
+                if raster_enabled:
+                    if not raster_style_ready:
+                        ok_raster_style, msg_raster_style = ensure_dwg_raster_style()
+                        if not ok_raster_style:
+                            return False, [], f"Raster style creation failed: {msg_raster_style}"
+                        raster_style_ready = True
+
+                    ok_style_attach, msg_style_attach = add_raster_style_to_layer(layer_name)
+                    if not ok_style_attach:
+                        return False, [], f"Attach raster style failed for {layer_name}: {msg_style_attach}"
+                    raster_url = get_raster_url_v2(layer_name)
+                else:
+                    raster_message = (
+                        "未启用栅格样式，缺少字段: "
+                        + ", ".join(missing_columns)
+                    )
 
                 ok_gwc, msg_gwc = enable_gwc_mvt(layer_name)
                 if not ok_gwc:
@@ -1319,7 +1364,10 @@ def publish_gpkg_layers(
                         "layer_name": layer_name,
                         "native_layer_name": native_name,
                         "mvt_url": get_mvt_url(layer_name),
-                        "raster_url": get_raster_url_v2(layer_name),
+                        "raster_url": raster_url,
+                        "raster_enabled": raster_enabled,
+                        "raster_message": raster_message,
+                        "missing_raster_columns": missing_columns,
                         "bbox": list(bbox) if bbox else None,
                     }
                 )
