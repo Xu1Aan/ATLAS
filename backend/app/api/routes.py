@@ -101,6 +101,7 @@ def _load_job(job_id: str) -> dict | None:
     layers = None
     primary_layer_name = None
     primary_bbox = None
+
     if gpkg_path and gpkg_path.exists():
         native_layers = conversion.get_gpkg_feature_layers(gpkg_path)
         layers = []
@@ -207,22 +208,42 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
             _update_job(job_id, status="error", message="GeoPackage 中没有可发布的要素图层", progress=0)
             return
 
+        if source_format == "dxf" and "entities" in native_layers:
+            native_layers = ["entities"]
+
         ok_ws, ws_err = gs.ensure_workspace()
         if not ok_ws:
             _update_job(job_id, status="error", message=f"GeoServer 不可用: {ws_err}", progress=0)
             return
 
-        layer_specs = [
-            {
-                "layer_name": _layer_name_for(job_id, native_layer_name, index),
+        if len(native_layers) == 1:
+            native_layer_name = native_layers[0]
+            layer_name = _layer_name_for(job_id, native_layer_name, 0)
+            ok_pub, pub_err = gs.publish_gpkg(gpkg_path, f"job_{job_id}", layer_name, native_layer_name=native_layer_name)
+            if not ok_pub:
+                _update_job(job_id, status="error", message=f"GeoServer 发布失败: {pub_err}", progress=0)
+                return
+
+            ok_bbox, bbox = conversion.get_gpkg_bbox(gpkg_path, native_layer_name)
+            published_layers = [{
+                "layer_name": layer_name,
                 "native_layer_name": native_layer_name,
-            }
-            for index, native_layer_name in enumerate(native_layers)
-        ]
-        ok_pub, published_layers, pub_err = gs.publish_gpkg_layers(gpkg_path, f"job_{job_id}", layer_specs)
-        if not ok_pub:
-            _update_job(job_id, status="error", message=f"GeoServer 发布失败: {pub_err}", progress=0)
-            return
+                "mvt_url": gs.get_mvt_url(layer_name),
+                "raster_url": gs.get_raster_url_v2(layer_name),
+                "bbox": bbox if ok_bbox else None,
+            }]
+        else:
+            layer_specs = [
+                {
+                    "layer_name": _layer_name_for(job_id, native_layer_name, index),
+                    "native_layer_name": native_layer_name,
+                }
+                for index, native_layer_name in enumerate(native_layers)
+            ]
+            ok_pub, published_layers, pub_err = gs.publish_gpkg_layers(gpkg_path, f"job_{job_id}", layer_specs)
+            if not ok_pub:
+                _update_job(job_id, status="error", message=f"GeoServer 发布失败: {pub_err}", progress=0)
+                return
 
         primary_layer = published_layers[0]
         primary_bbox = primary_layer.get("bbox")
@@ -248,7 +269,6 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
 
 @router.get("/jobs", response_model=list[dict])
 async def list_jobs():
-    """List all uploaded jobs."""
     jobs_list = []
     jobs_dir = settings.work_dir / "jobs"
     if not jobs_dir.exists():
@@ -280,7 +300,6 @@ async def list_jobs():
 
 @router.post("/convert", response_model=ConvertResponse)
 def upload_and_convert(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    """Upload a supported file, convert it to GeoPackage, and publish it to GeoServer."""
     if not file.filename:
         raise HTTPException(400, "请选择要上传的文件")
 
@@ -304,9 +323,9 @@ def upload_and_convert(file: UploadFile = File(...), background_tasks: Backgroun
 
     start_message = {
         "dwg": "正在转换 DWG -> DXF -> GeoPackage",
-        "dxf": "正在转换 DXF -> GeoPackage",
-        "kml": "正在转换 KML -> GeoPackage",
-        "shp_zip": "正在解压 SHP(zip) -> GeoPackage",
+        "dxf": "正在准备 DXF 文件...",
+        "kml": "正在准备 KML 文件...",
+        "shp_zip": "正在解压 SHP(zip)...",
     }[source_format]
 
     _jobs[job_id] = {
@@ -327,7 +346,7 @@ def upload_and_convert(file: UploadFile = File(...), background_tasks: Backgroun
     }
     _persist_job(job_id)
 
-    if background_tasks:
+    if background_tasks is not None:
         background_tasks.add_task(process_conversion_task, job_id, source_path, job_dir, source_format)
     else:
         process_conversion_task(job_id, source_path, job_dir, source_format)

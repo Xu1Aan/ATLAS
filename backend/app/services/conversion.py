@@ -1806,7 +1806,7 @@ def _convert_vector_to_gpkg(
     source_path = Path(source_path)
 
     if progress_callback:
-        progress_callback(10, f"姝ｅ湪鍒濆鍖?{source_label} 鏂囦欢...")
+        progress_callback(10, f"正在准备 {source_label} 文件...")
 
     layer_names = _ogrinfo_layer_names(source_path)
     if not layer_names and source_path.suffix.lower() == ".dxf":
@@ -1817,7 +1817,7 @@ def _convert_vector_to_gpkg(
     if require_source_srs:
         missing_srs = [layer for layer in layer_names if not _ogr_layer_has_declared_srs(source_path, layer)]
         if missing_srs:
-            return False, None, f"{source_label} 缂哄皯鍙敤鍧愭爣绯讳俊鎭? {', '.join(missing_srs)}"
+            return False, None, f"{source_label} 缺少可用坐标系信息: {', '.join(missing_srs)}"
 
     if gpkg_path.exists():
         try:
@@ -1826,7 +1826,7 @@ def _convert_vector_to_gpkg(
             return False, None, f"Failed to remove existing GPKG: {e}"
 
     if progress_callback:
-        progress_callback(60, f"姝ｅ湪灏?{source_label} 杞崲涓?GeoPackage...")
+        progress_callback(60, f"正在将 {source_label} 转换为 GeoPackage...")
 
     cmd = [
         settings.ogr2ogr_cmd,
@@ -1851,7 +1851,7 @@ def _convert_vector_to_gpkg(
         return False, None, f"GDAL conversion failed: {err}"
 
     if progress_callback:
-        progress_callback(100, "杞崲瀹屾垚")
+        progress_callback(100, "转换完成")
     return True, gpkg_path, ""
 
 
@@ -1859,7 +1859,7 @@ def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None
     target_dxf = output_dir / "source.dxf"
 
     if progress_callback:
-        progress_callback(10, "姝ｅ湪鍒濆鍖?..")
+        progress_callback(10, "正在准备 DXF 文件...")
 
     try:
         if dxf_path.resolve() != target_dxf.resolve():
@@ -1897,7 +1897,7 @@ def _extract_zip_file(zip_path: Path, output_dir: Path) -> tuple[bool, Path | No
     except zipfile.BadZipFile:
         return False, None, "ZIP file is invalid"
     except Exception as e:
-        return False, None, f"瑙ｅ帇 ZIP 澶辫触: {e}"
+        return False, None, f"解压 ZIP 失败: {e}"
 
 
 def _find_shp_main_file(extract_dir: Path, zip_path: Path) -> tuple[Path | None, str]:
@@ -1915,16 +1915,16 @@ def _find_shp_main_file(extract_dir: Path, zip_path: Path) -> tuple[Path | None,
     required_suffixes = [".shp", ".shx", ".dbf"]
     missing = [suffix for suffix in required_suffixes if not shp_path.with_suffix(suffix).exists()]
     if missing:
-        return None, f"SHP 缂哄皯蹇呰鏂囦欢: {', '.join(missing)}"
+        return None, f"SHP 缺少必要文件: {', '.join(missing)}"
     if not shp_path.with_suffix(".prj").exists():
-        return None, "SHP 缂哄皯 .prj 锛屾棤娉曡瘑鍒潗鏍囩郴"
+        return None, "SHP 缺少 .prj，无法识别坐标系"
 
     return shp_path, ""
 
 
 def convert_shp_zip_to_gpkg(zip_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
     if progress_callback:
-        progress_callback(10, "姝ｅ湪瑙ｅ帇 SHP ZIP...")
+        progress_callback(10, "正在解压 SHP ZIP...")
 
     ok, extract_dir, err = _extract_zip_file(zip_path, output_dir)
     if not ok or not extract_dir:
@@ -2001,6 +2001,415 @@ def get_gpkg_bbox(gpkg_path: Path, table_name: str = "entities") -> tuple[bool, 
         return False, None
     except Exception:
         return False, None
+
+
+def _copy_to_ascii_path_safe(source_path: Path, target_path: Path) -> tuple[bool, str]:
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.resolve() != target_path.resolve():
+            shutil.copy2(source_path, target_path)
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def _prepare_ascii_source_safe(source_path: Path, output_dir: Path, target_name: str) -> tuple[bool, Path | None, str]:
+    target_path = output_dir / target_name
+    ok, err = _copy_to_ascii_path_safe(source_path, target_path)
+    if not ok:
+        return False, None, f"创建中间文件失败: {err}"
+    return True, target_path, ""
+
+
+def _ogrinfo_layer_names_safe(source_path: Path) -> list[str]:
+    ok, out = _run(["ogrinfo", "-ro", "-so", str(source_path)])
+    if not ok:
+        return []
+
+    layer_names: list[str] = []
+    for line in out.splitlines():
+        match = re.match(r"^\s*\d+:\s+(.+?)\s+\(", line)
+        if match:
+            layer_names.append(match.group(1).strip())
+    return layer_names
+
+
+def _ogr_layer_has_declared_srs_safe(source_path: Path, layer_name: str) -> bool:
+    ok, out = _run(["ogrinfo", "-ro", "-so", str(source_path), layer_name])
+    if not ok:
+        return False
+    lowered = out.lower()
+    return "layer srs wkt:" in lowered and "unknown" not in lowered and "(unknown)" not in lowered
+
+
+def _convert_vector_to_gpkg_safe(
+    source_path: Path,
+    output_dir: Path,
+    progress_callback=None,
+    source_label: str = "矢量",
+    require_source_srs: bool = False,
+    probe_layers: bool = True,
+) -> tuple[bool, Path | None, str]:
+    gpkg_path = output_dir / "source.gpkg"
+
+    if progress_callback:
+        progress_callback(10, f"正在准备 {source_label} 文件...")
+
+    layer_names: list[str] = []
+    if probe_layers:
+        layer_names = _ogrinfo_layer_names_safe(source_path)
+        if not layer_names:
+            return False, None, f"无法识别 {source_label} 中的图层"
+
+    if require_source_srs:
+        missing_srs = [layer for layer in layer_names if not _ogr_layer_has_declared_srs_safe(source_path, layer)]
+        if missing_srs:
+            return False, None, f"{source_label} 缺少可用坐标系信息: {', '.join(missing_srs)}"
+
+    if gpkg_path.exists():
+        try:
+            gpkg_path.unlink()
+        except Exception as e:
+            return False, None, f"删除已有 GeoPackage 失败: {e}"
+
+    if progress_callback:
+        progress_callback(60, f"正在将 {source_label} 转换为 GeoPackage...")
+
+    cmd = [
+        settings.ogr2ogr_cmd,
+        "-f", "GPKG",
+        str(gpkg_path),
+    ]
+    if source_path.suffix.lower() == ".dxf":
+        cmd.extend([
+            "--config", "DXF_ENCODING", "UTF-8",
+            "--config", "DXF_MERGE_BLOCK_GEOMETRIES", "FALSE",
+            "--config", "DXF_INLINE_BLOCKS", "TRUE",
+            "--config", "DXF_ATTRIBUTES", "TRUE",
+        ])
+    cmd.extend([
+        str(source_path),
+        "-skipfailures",
+        "-t_srs", settings.target_srs,
+        "-lco", "GEOMETRY_NAME=geom",
+    ])
+    ok, err = _run(cmd, cwd=output_dir, timeout=3600)
+    if not ok:
+        return False, None, f"GDAL 转换失败: {err}"
+
+    if progress_callback:
+        progress_callback(100, "转换完成")
+    return True, gpkg_path, ""
+
+
+def _extract_zip_file_safe(zip_path: Path, output_dir: Path) -> tuple[bool, Path | None, str]:
+    extract_dir = output_dir / "extract_src"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir, ignore_errors=True)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            root_dir = extract_dir.resolve()
+            for member in archive.infolist():
+                member_path = (extract_dir / member.filename).resolve()
+                if root_dir not in member_path.parents and member_path != root_dir:
+                    return False, None, "ZIP contains invalid paths"
+            archive.extractall(extract_dir)
+        return True, extract_dir, ""
+    except zipfile.BadZipFile:
+        return False, None, "ZIP 文件无效"
+    except Exception as e:
+        return False, None, f"解压 ZIP 失败: {e}"
+
+
+def _find_shp_main_file_safe(extract_dir: Path, zip_path: Path) -> tuple[Path | None, str]:
+    shp_files = sorted(extract_dir.rglob("*.shp"))
+    if not shp_files:
+        return None, "ZIP 内未找到 .shp 文件"
+
+    zip_stem = zip_path.stem.lower()
+    matches = [path for path in shp_files if path.stem.lower() == zip_stem]
+    candidates = matches or shp_files
+    if len(candidates) > 1:
+        return None, "ZIP 内包含多个 SHP 文件，请只保留一个主图层"
+
+    shp_path = candidates[0]
+    required_suffixes = [".shp", ".shx", ".dbf"]
+    missing = [suffix for suffix in required_suffixes if not shp_path.with_suffix(suffix).exists()]
+    if missing:
+        return None, f"SHP 缺少必要文件: {', '.join(missing)}"
+    if not shp_path.with_suffix(".prj").exists():
+        return None, "SHP 缺少 .prj，无法识别坐标系"
+    return shp_path, ""
+
+
+def _copy_shp_bundle_to_ascii_dir_safe(shp_path: Path, output_dir: Path) -> tuple[bool, Path | None, str]:
+    source_dir = output_dir / "source_shp"
+    if source_dir.exists():
+        shutil.rmtree(source_dir, ignore_errors=True)
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    copied_any = False
+    for item in shp_path.parent.iterdir():
+        if item.is_file() and item.stem.lower() == shp_path.stem.lower():
+            target = source_dir / f"source{item.suffix.lower()}"
+            ok, err = _copy_to_ascii_path_safe(item, target)
+            if not ok:
+                return False, None, f"复制 SHP 组成文件失败: {err}"
+            copied_any = True
+
+    if not copied_any:
+        return False, None, "未找到可复制的 SHP 组成文件"
+
+    ascii_shp = source_dir / "source.shp"
+    if not ascii_shp.exists():
+        return False, None, "复制后的 source.shp 不存在"
+    return True, ascii_shp, ""
+
+
+def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    if progress_callback:
+        progress_callback(10, "正在准备 DXF 文件...")
+
+    ok, target_dxf, err = _prepare_ascii_source_safe(dxf_path, output_dir, "source.dxf")
+    if not ok or not target_dxf:
+        return False, None, err
+
+    # Reuse the DWG pipeline from the prepared DXF stage onward.
+    gpkg_path = output_dir / "source.gpkg"
+
+    if progress_callback:
+        progress_callback(40, "正在修复编码...")
+    try:
+        repair_dxf_encoding(target_dxf)
+    except Exception as e:
+        print(f"Encoding repair warning: {e}")
+
+    if progress_callback:
+        progress_callback(50, "正在解析图层...")
+    layer_colors = parse_dxf_layers(target_dxf)
+
+    if progress_callback:
+        progress_callback(60, "正在将 DXF 转换为 GeoPackage...")
+
+    cmd_gpkg = [
+        settings.ogr2ogr_cmd,
+        "--config", "DXF_ENCODING", "UTF-8",
+        "--config", "DXF_MERGE_BLOCK_GEOMETRIES", "FALSE",
+        "--config", "DXF_INLINE_BLOCKS", "TRUE",
+        "--config", "DXF_ATTRIBUTES", "TRUE",
+        "-f", "GPKG",
+        str(gpkg_path),
+        str(target_dxf),
+        "-skipfailures",
+        "-lco", "GEOMETRY_NAME=geom",
+    ]
+
+    if settings.enable_gauss_kruger_transform:
+        zone = settings.gauss_kruger_zone or 39
+        central_meridian = zone * 3
+        false_easting = zone * 1000000 + 500000
+        dxf_extent = _get_dxf_extent(target_dxf)
+        if dxf_extent:
+            min_x, _, max_x, _ = dxf_extent
+            if max(abs(min_x), abs(max_x)) < 1000000:
+                false_easting = 500000
+        source_srs = f"+proj=tmerc +lat_0=0 +lon_0={central_meridian} +k=0.9996 +x_0={false_easting} +y_0=0 +datum=WGS84 +units=m +no_defs"
+        cmd_gpkg.extend(["-s_srs", source_srs, "-t_srs", "EPSG:4326"])
+
+    if gpkg_path.exists():
+        try:
+            gpkg_path.unlink()
+        except Exception as e:
+            return False, None, f"删除已有 GeoPackage 失败: {e}"
+
+    ok, err = _run(cmd_gpkg, cwd=output_dir, timeout=3600)
+    count = check_gpkg_count(gpkg_path)
+    if ok and count < 500:
+        gpkg_backup = gpkg_path.with_suffix(".gpkg.bak")
+        try:
+            shutil.copy2(gpkg_path, gpkg_backup)
+        except Exception:
+            gpkg_backup = None
+
+        cmd_retry = list(cmd_gpkg)
+        for i, arg in enumerate(cmd_retry):
+            if arg == "DXF_INLINE_BLOCKS":
+                cmd_retry[i + 1] = "FALSE"
+
+        ok_retry, err_retry = _run(cmd_retry, cwd=output_dir, timeout=3600)
+        count_retry = check_gpkg_count(gpkg_path)
+        if ok_retry and count_retry > count:
+            ok = ok_retry
+            err = err_retry
+        elif gpkg_backup and gpkg_backup.exists():
+            try:
+                shutil.move(gpkg_backup, gpkg_path)
+            except Exception:
+                pass
+
+    if not ok:
+        return False, None, f"GDAL 转换失败: {err}"
+
+    if progress_callback:
+        progress_callback(80, "正在处理数据...")
+    try:
+        conn = sqlite3.connect(gpkg_path)
+        conn.text_factory = lambda b: b.decode(errors="ignore")
+        def mock_bool(*args): return 0
+        def mock_float(*args): return 0.0
+        def mock_str(*args): return ""
+        conn.create_function("ST_IsEmpty", 1, mock_bool)
+        conn.create_function("ST_MinX", 1, mock_float)
+        conn.create_function("ST_MaxX", 1, mock_float)
+        conn.create_function("ST_MinY", 1, mock_float)
+        conn.create_function("ST_MaxY", 1, mock_float)
+        conn.create_function("ST_GeometryType", 1, mock_str)
+        c = conn.cursor()
+
+        try:
+            c.execute("CREATE INDEX IF NOT EXISTS idx_entities_handle ON entities(EntityHandle)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_entities_layer ON entities(Layer)")
+        except Exception:
+            pass
+
+        c.execute("PRAGMA table_info(entities)")
+        cols = [r[1] for r in c.fetchall()]
+        for col_name, col_type in {
+            "line_color": "TEXT",
+            "fill_color": "TEXT",
+            "rotation": "REAL",
+            "line_width": "REAL",
+            "text_font": "TEXT",
+            "text_size": "REAL",
+            "text_color": "TEXT",
+            "text_angle": "REAL",
+            "text_content": "TEXT",
+            "anchor_x": "REAL",
+            "anchor_y": "REAL",
+        }.items():
+            if col_name not in cols:
+                c.execute(f"ALTER TABLE entities ADD COLUMN {col_name} {col_type}")
+
+        if progress_callback:
+            progress_callback(70, "正在解析实体属性...")
+        attrs_map = extract_dxf_attributes(target_dxf)
+        if attrs_map:
+            anchors = []
+            shifts = []
+            sizes = []
+            rotations = []
+            text_colors = []
+            line_colors = []
+            fill_colors = []
+            line_widths = []
+            full_texts = []
+
+            for handle, data in attrs_map.items():
+                if "ax" in data:
+                    anchors.append((data["ax"], data["ay"], handle))
+                if "dx" in data:
+                    shifts.append((data["dx"], data["dy"], handle))
+                if "h" in data and data["h"] > 0:
+                    sizes.append((data["h"], handle))
+                if "r" in data:
+                    rotations.append((data["r"], handle))
+                if "t" in data:
+                    full_texts.append((data["t"], handle))
+
+                color = data.get("c")
+                if not color and data.get("layer") in layer_colors:
+                    color = layer_colors[data["layer"]]
+                if color:
+                    if color == "#000000":
+                        color = "#FFFFFF"
+                    if data.get("type") in ("TEXT", "MTEXT"):
+                        text_colors.append((color, handle))
+                    else:
+                        line_colors.append((color, handle))
+
+                fill = data.get("fill")
+                if not fill and data.get("type") in ("HATCH", "SOLID", "TRACE") and color:
+                    fill = color
+                if fill:
+                    if fill == "#000000":
+                        fill = "#FFFFFF"
+                    fill_colors.append((fill, handle))
+
+                if "lw" in data:
+                    line_widths.append((data["lw"], handle))
+
+            if anchors:
+                c.executemany("UPDATE entities SET anchor_x=?, anchor_y=? WHERE EntityHandle=?", anchors)
+            if sizes:
+                c.executemany("UPDATE entities SET text_size=? WHERE EntityHandle=?", sizes)
+            if rotations:
+                c.executemany("UPDATE entities SET text_angle=? WHERE EntityHandle=?", rotations)
+                c.executemany("UPDATE entities SET rotation=COALESCE(rotation, ?) WHERE EntityHandle=?", rotations)
+            if text_colors:
+                c.executemany("UPDATE entities SET text_color=? WHERE EntityHandle=?", text_colors)
+            if line_colors:
+                c.executemany("UPDATE entities SET line_color=? WHERE EntityHandle=?", line_colors)
+            if fill_colors:
+                c.executemany("UPDATE entities SET fill_color=? WHERE EntityHandle=?", fill_colors)
+            if line_widths:
+                c.executemany("UPDATE entities SET line_width=? WHERE EntityHandle=?", line_widths)
+            if full_texts:
+                if "Text" in cols:
+                    c.executemany("UPDATE entities SET Text=? WHERE EntityHandle=?", full_texts)
+                c.executemany("UPDATE entities SET text_content=? WHERE EntityHandle=?", full_texts)
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Post-processing error: {e}")
+
+    if progress_callback:
+        progress_callback(85, "正在清理坐标...")
+    try:
+        sanitize_coordinates(gpkg_path)
+    except Exception as e:
+        print(f"Sanitization warning: {e}")
+
+    try:
+        if progress_callback:
+            progress_callback(95, "正在重新打包 GeoPackage...")
+        repack_gpkg(gpkg_path)
+    except Exception as e:
+        print(f"Repack warning: {e}")
+
+    if progress_callback:
+        progress_callback(100, "转换完成")
+    return True, gpkg_path, ""
+
+
+def convert_kml_to_gpkg(kml_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    ok, target_kml, err = _prepare_ascii_source_safe(kml_path, output_dir, "source.kml")
+    if not ok or not target_kml:
+        return False, None, err
+    return _convert_vector_to_gpkg_safe(target_kml, output_dir, progress_callback=progress_callback, source_label="KML")
+
+
+def convert_shp_zip_to_gpkg(zip_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    if progress_callback:
+        progress_callback(10, "正在解压 SHP ZIP...")
+    ok, extract_dir, err = _extract_zip_file_safe(zip_path, output_dir)
+    if not ok or not extract_dir:
+        return False, None, err
+    shp_path, shp_err = _find_shp_main_file_safe(extract_dir, zip_path)
+    if not shp_path:
+        return False, None, shp_err
+    ok, ascii_shp, copy_err = _copy_shp_bundle_to_ascii_dir_safe(shp_path, output_dir)
+    if not ok or not ascii_shp:
+        return False, None, copy_err
+    return _convert_vector_to_gpkg_safe(
+        ascii_shp,
+        output_dir,
+        progress_callback=progress_callback,
+        source_label="SHP",
+        require_source_srs=True,
+    )
 
 
 def _copy_to_ascii_path_safe(source_path: Path, target_path: Path) -> tuple[bool, str]:

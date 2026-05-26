@@ -1208,6 +1208,9 @@ def publish_gpkg_layers(
         ok_style, msg_style = ensure_dwg_style()
         if not ok_style:
             return False, [], f"Style creation failed: {msg_style}"
+        ok_raster_style, msg_raster_style = ensure_dwg_raster_style()
+        if not ok_raster_style:
+            return False, [], f"Raster style creation failed: {msg_raster_style}"
 
         ws = settings.geoserver_workspace
         headers = _auth_headers()
@@ -1297,11 +1300,17 @@ def publish_gpkg_layers(
                     json=layer_body,
                 )
 
+                ok_style_attach, msg_style_attach = add_raster_style_to_layer(layer_name)
+                if not ok_style_attach:
+                    return False, [], f"Attach raster style failed for {layer_name}: {msg_style_attach}"
+
                 ok_gwc, msg_gwc = enable_gwc_mvt(layer_name)
                 if not ok_gwc:
                     return False, [], f"GWC tile config failed for {layer_name}: {msg_gwc}"
-                add_raster_style_to_layer(layer_name)
-                truncate_gwc_layer(layer_name)
+
+                ok_truncate, msg_truncate = truncate_gwc_layer(layer_name)
+                if not ok_truncate:
+                    return False, [], f"GWC cache cleanup failed for {layer_name}: {msg_truncate}"
 
                 published_layers.append(
                     {
