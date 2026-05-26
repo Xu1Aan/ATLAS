@@ -180,7 +180,7 @@ const onSubmit = async () => {
 
           addLog('上传完成，等待服务端处理...')
           progress.value = 0
-          progressMsg.value = '准备转换...'
+          progressMsg.value = '等待后台转换...'
           currentJobId.value = res.job_id
           pollStatus(res.job_id)
         } catch {

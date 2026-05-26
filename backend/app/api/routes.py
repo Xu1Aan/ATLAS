@@ -24,6 +24,8 @@ SUPPORTED_EXTENSIONS = {
     ".zip": "shp_zip",
 }
 
+UPLOAD_COPY_BUFFER_SIZE = 8 * 1024 * 1024
+
 _jobs: dict[str, dict] = {}
 
 
@@ -181,6 +183,24 @@ def _convert_source_to_gpkg(source_format: str, source_path: Path, job_dir: Path
     return converters[source_format](source_path, job_dir, progress_callback=progress_callback)
 
 
+def _save_uploaded_file(upload_file: UploadFile, destination: Path) -> None:
+    source = upload_file.file
+    try:
+        source.seek(0)
+    except Exception:
+        pass
+
+    temp_name = getattr(source, "name", None)
+    if isinstance(temp_name, str):
+        temp_path = Path(temp_name)
+        if temp_path.exists() and temp_path.is_file():
+            shutil.copy2(temp_path, destination)
+            return
+
+    with destination.open("wb") as target:
+        shutil.copyfileobj(source, target, length=UPLOAD_COPY_BUFFER_SIZE)
+
+
 def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, source_format: str):
     """Background conversion and GeoServer publishing."""
 
@@ -188,7 +208,12 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
         _update_job(job_id, progress=percent, message=msg)
 
     try:
-        ok, gpkg_path, err = _convert_source_to_gpkg(source_format, source_path, job_dir, progress_callback=update_progress)
+        ok, gpkg_path, err = _convert_source_to_gpkg(
+            source_format,
+            source_path,
+            job_dir,
+            progress_callback=update_progress,
+        )
         if not ok or not gpkg_path:
             _update_job(job_id, status="error", message=err, progress=0)
             return
@@ -219,19 +244,26 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
         if len(native_layers) == 1:
             native_layer_name = native_layers[0]
             layer_name = _layer_name_for(job_id, native_layer_name, 0)
-            ok_pub, pub_err = gs.publish_gpkg(gpkg_path, f"job_{job_id}", layer_name, native_layer_name=native_layer_name)
+            ok_pub, pub_err = gs.publish_gpkg(
+                gpkg_path,
+                f"job_{job_id}",
+                layer_name,
+                native_layer_name=native_layer_name,
+            )
             if not ok_pub:
                 _update_job(job_id, status="error", message=f"GeoServer 发布失败: {pub_err}", progress=0)
                 return
 
             ok_bbox, bbox = conversion.get_gpkg_bbox(gpkg_path, native_layer_name)
-            published_layers = [{
-                "layer_name": layer_name,
-                "native_layer_name": native_layer_name,
-                "mvt_url": gs.get_mvt_url(layer_name),
-                "raster_url": gs.get_raster_url_v2(layer_name),
-                "bbox": bbox if ok_bbox else None,
-            }]
+            published_layers = [
+                {
+                    "layer_name": layer_name,
+                    "native_layer_name": native_layer_name,
+                    "mvt_url": gs.get_mvt_url(layer_name),
+                    "raster_url": gs.get_raster_url_v2(layer_name),
+                    "bbox": bbox if ok_bbox else None,
+                }
+            ]
         else:
             layer_specs = [
                 {
@@ -240,7 +272,11 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
                 }
                 for index, native_layer_name in enumerate(native_layers)
             ]
-            ok_pub, published_layers, pub_err = gs.publish_gpkg_layers(gpkg_path, f"job_{job_id}", layer_specs)
+            ok_pub, published_layers, pub_err = gs.publish_gpkg_layers(
+                gpkg_path,
+                f"job_{job_id}",
+                layer_specs,
+            )
             if not ok_pub:
                 _update_job(job_id, status="error", message=f"GeoServer 发布失败: {pub_err}", progress=0)
                 return
@@ -263,8 +299,8 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
             wmts_url=gs.get_wmts_capabilities_url(),
             bbox=primary_bbox,
         )
-    except Exception as e:
-        _update_job(job_id, status="error", message=f"服务器错误: {e}", progress=0)
+    except Exception as exc:
+        _update_job(job_id, status="error", message=f"服务端错误: {exc}", progress=0)
 
 
 @router.get("/jobs", response_model=list[dict])
@@ -294,12 +330,12 @@ async def list_jobs():
             }
         )
 
-    jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
+    jobs_list.sort(key=lambda item: item["created_at"], reverse=True)
     return jobs_list
 
 
-@router.post("/convert", response_model=ConvertResponse)
-def upload_and_convert(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+@router.post("/convert", response_model=ConvertResponse, status_code=202)
+async def upload_and_convert(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(400, "请选择要上传的文件")
 
@@ -314,15 +350,14 @@ def upload_and_convert(file: UploadFile = File(...), background_tasks: Backgroun
     source_path = job_dir / file.filename
 
     try:
-        with source_path.open("wb") as f:
-            shutil.copyfileobj(file.file, f)
-    except Exception as e:
-        _jobs[job_id] = {"status": "error", "message": str(e), "progress": 0}
+        _save_uploaded_file(file, source_path)
+    except Exception as exc:
+        _jobs[job_id] = {"status": "error", "message": str(exc), "progress": 0}
         _persist_job(job_id)
         return _job_response(job_id)
 
     start_message = {
-        "dwg": "正在转换 DWG -> DXF -> GeoPackage",
+        "dwg": "正在准备 DWG 文件...",
         "dxf": "正在准备 DXF 文件...",
         "kml": "正在准备 KML 文件...",
         "shp_zip": "正在解压 SHP(zip)...",
@@ -346,11 +381,7 @@ def upload_and_convert(file: UploadFile = File(...), background_tasks: Backgroun
     }
     _persist_job(job_id)
 
-    if background_tasks is not None:
-        background_tasks.add_task(process_conversion_task, job_id, source_path, job_dir, source_format)
-    else:
-        process_conversion_task(job_id, source_path, job_dir, source_format)
-
+    background_tasks.add_task(process_conversion_task, job_id, source_path, job_dir, source_format)
     return _job_response(job_id)
 
 

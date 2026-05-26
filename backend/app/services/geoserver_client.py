@@ -587,7 +587,9 @@ def truncate_gwc_layer(layer_name: str) -> tuple[bool, str]:
                 headers={**_auth_headers(), "Content-Type": "application/xml"}, 
                 content=body
             )
-            if r.status_code == 200:
+            # Freshly published layers often have no cache entries yet, and GeoServer
+            # may answer 400/404 for masstruncate. That should not fail publishing.
+            if r.status_code in (200, 202, 400, 404):
                 return True, ""
             return False, f"Cache cleanup failed: {r.status_code}"
     except Exception as e:
