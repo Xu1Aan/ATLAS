@@ -324,6 +324,26 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
         _update_job(job_id, status="error", message=f"服务端错误: {exc}", progress=0)
 
 
+def process_minio_conversion_task(
+    job_id: str,
+    job_dir: Path,
+    bucket_name: str,
+    object_name: str,
+    filename: str,
+    source_format: str,
+):
+    source_path = job_dir / filename
+    try:
+        _update_job(job_id, progress=5, message="正在从 MinIO 下载源文件...")
+        minio_client.download_object(bucket_name, object_name, source_path)
+        _update_job(job_id, source_path=str(source_path), progress=15, message="MinIO 下载完成，开始转换...")
+    except Exception as exc:
+        _update_job(job_id, status="error", message=f"MinIO 下载失败: {exc}", progress=0)
+        return
+
+    process_conversion_task(job_id, source_path, job_dir, source_format)
+
+
 @router.get("/jobs", response_model=list[dict])
 async def list_jobs():
     jobs_list = []
@@ -384,25 +404,43 @@ async def upload_and_convert(background_tasks: BackgroundTasks, file: UploadFile
         "shp_zip": "正在解压 SHP(zip)...",
     }[source_format]
 
-    _jobs[job_id] = {
-        "status": "converting",
-        "message": start_message,
-        "progress": 0,
-        "original_filename": file.filename,
-        "source_format": source_format,
-        "source_path": str(source_path),
-        "dxf_path": None,
-        "gpkg_path": None,
-        "layer_name": None,
-        "layers": None,
-        "mvt_url": None,
-        "raster_url": None,
-        "wmts_url": None,
-        "bbox": None,
-    }
-    _persist_job(job_id)
+    _init_job(job_id, file.filename, source_format, source_path, start_message)
 
     background_tasks.add_task(process_conversion_task, job_id, source_path, job_dir, source_format)
+    return _job_response(job_id)
+
+
+@router.post("/convert/minio", response_model=ConvertResponse, status_code=202)
+async def convert_from_minio(background_tasks: BackgroundTasks, payload: MinioConvertRequest):
+    raw_name = payload.filename or Path(payload.object_name).name
+    filename = minio_client.safe_filename(raw_name)
+    suffix = Path(filename).suffix.lower()
+    source_format = SUPPORTED_EXTENSIONS.get(suffix)
+    if not source_format:
+        raise HTTPException(400, "仅支持 DWG / DXF / SHP(zip) / KML 文件")
+
+    job_id = uuid.uuid4().hex
+    job_dir = _job_dir(job_id)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    source_path = job_dir / filename
+
+    _init_job(
+        job_id,
+        filename,
+        source_format,
+        source_path,
+        "正在从 MinIO 下载源文件...",
+    )
+
+    background_tasks.add_task(
+        process_minio_conversion_task,
+        job_id,
+        job_dir,
+        payload.bucket_name,
+        payload.object_name,
+        filename,
+        source_format,
+    )
     return _job_response(job_id)
 
 
