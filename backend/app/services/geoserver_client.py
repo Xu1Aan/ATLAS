@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import sqlite3
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -47,6 +48,38 @@ def _delete_datastore_if_exists(client: httpx.Client, workspace: str, store_name
     if deleted.status_code not in (200, 202, 404):
         return False, f"Failed to delete datastore: {deleted.status_code} {deleted.text[:200]}"
     return True, ""
+
+
+def _wait_for_datastore_ready(
+    client: httpx.Client,
+    workspace: str,
+    store_name: str,
+    headers: dict,
+    timeout_seconds: float = 15.0,
+    interval_seconds: float = 0.5,
+) -> tuple[bool, str]:
+    """Poll GeoServer until the uploaded datastore becomes visible via REST."""
+    datastore_url = _rest(f"workspaces/{workspace}/datastores/{store_name}.json")
+    deadline = time.monotonic() + timeout_seconds
+    last_status = None
+    last_body = ""
+
+    while time.monotonic() < deadline:
+        try:
+            resp = client.get(datastore_url, headers=headers)
+            last_status = resp.status_code
+            last_body = resp.text[:200]
+            if resp.status_code == 200:
+                return True, ""
+            if resp.status_code not in (404, 503):
+                return False, f"检查 datastore 状态失败: {resp.status_code} {last_body}"
+        except Exception as exc:
+            last_body = str(exc)
+        time.sleep(interval_seconds)
+
+    if last_status is None:
+        return False, f"GeoServer datastore 未就绪，无法创建图层: {store_name}"
+    return False, f"GeoServer datastore 未就绪，无法创建图层: {store_name} (最后状态 {last_status}: {last_body})"
 
 
 def _read_gpkg_bbox(gpkg_path: Path, table_name: str = "entities") -> tuple[float, float, float, float] | None:
@@ -1263,6 +1296,10 @@ def publish_gpkg_layers(
             if uploaded.status_code not in (200, 201):
                 return False, [], f"Create datastore by upload failed: {uploaded.status_code} {uploaded.text[:300]}"
 
+            ok_ready, msg_ready = _wait_for_datastore_ready(client, ws, store_name, headers)
+            if not ok_ready:
+                return False, [], msg_ready
+
             featuretypes_url = _rest(f"workspaces/{ws}/datastores/{store_name}/featuretypes.json")
             for spec in layer_specs:
                 layer_name = spec["layer_name"]
@@ -1281,7 +1318,7 @@ def publish_gpkg_layers(
                 )
                 if created_featuretype.status_code not in (200, 201):
                     return False, [], (
-                        f"Create featureType failed for {native_name}: "
+                        f"Create featureType failed for datastore {store_name}, layer {native_name}: "
                         f"{created_featuretype.status_code} {created_featuretype.text[:200]}"
                     )
 

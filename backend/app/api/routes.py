@@ -11,9 +11,10 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.config import settings
-from app.models.schemas import ConvertResponse
+from app.models.schemas import ConvertResponse, MinioConvertRequest
 from app.services import conversion
 from app.services import geoserver_client as gs
+from app.services import minio_client
 
 router = APIRouter(prefix="/api", tags=["convert"])
 
@@ -225,6 +226,26 @@ def _save_uploaded_file(upload_file: UploadFile, destination: Path) -> None:
         shutil.copyfileobj(source, target, length=UPLOAD_COPY_BUFFER_SIZE)
 
 
+def _init_job(job_id: str, original_filename: str, source_format: str, source_path: Path, message: str) -> None:
+    _jobs[job_id] = {
+        "status": "converting",
+        "message": message,
+        "progress": 0,
+        "original_filename": original_filename,
+        "source_format": source_format,
+        "source_path": str(source_path),
+        "dxf_path": None,
+        "gpkg_path": None,
+        "layer_name": None,
+        "layers": None,
+        "mvt_url": None,
+        "raster_url": None,
+        "wmts_url": None,
+        "bbox": None,
+    }
+    _persist_job(job_id)
+
+
 def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, source_format: str):
     """Background conversion and GeoServer publishing."""
 
@@ -254,7 +275,7 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
 
         native_layers = conversion.get_gpkg_feature_layers(gpkg_path)
         if not native_layers:
-            _update_job(job_id, status="error", message="GeoPackage 中没有可发布的要素图层", progress=0)
+            _update_job(job_id, status="error", message="已生成 GeoPackage，但没有可发布的要素图层", progress=0)
             return
 
         if source_format == "dxf" and "entities" in native_layers:

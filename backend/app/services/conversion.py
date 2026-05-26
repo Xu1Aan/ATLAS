@@ -2777,6 +2777,9 @@ def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None
 
 
 def convert_kml_to_gpkg(kml_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    if progress_callback:
+        progress_callback(10, "正在准备 KML 文件...")
+
     ok, target_kml, err = _prepare_ascii_source_safe(kml_path, output_dir, "source.kml")
     if not ok or not target_kml:
         return False, None, err
@@ -2787,7 +2790,7 @@ def convert_kml_to_gpkg(kml_path: Path, output_dir: Path, progress_callback=None
         progress_callback=progress_callback,
         source_label="KML",
         require_source_srs=False,
-        probe_layers=True,
+        probe_layers=False,
     )
 
 

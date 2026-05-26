@@ -31,3 +31,11 @@ class ConvertResponse(BaseModel):
     raster_url: str | None = Field(None, description="XYZ raster tile URL")
     wmts_url: str | None = Field(None, description="WMTS Capabilities URL")
     bbox: list[float] | None = Field(None, description="Layer bbox [minx, miny, maxx, maxy] EPSG:4326")
+
+
+class MinioConvertRequest(BaseModel):
+    """Request body for converting a source file stored in MinIO."""
+
+    bucket_name: str = Field(..., description="MinIO bucket name")
+    object_name: str = Field(..., description="MinIO object key")
+    filename: str | None = Field(None, description="Optional local filename override")

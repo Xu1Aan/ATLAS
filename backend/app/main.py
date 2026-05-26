@@ -32,6 +32,7 @@ async def lifespan(_: FastAPI):
     logger.info("work_dir=%s", settings.work_dir)
     logger.info("geoserver_url=%s", settings.geoserver_url)
     logger.info("geoserver_public_url=%s", settings.geoserver_public_url)
+    logger.info("minio_endpoint=%s", settings.minio_endpoint)
     _log_dependency_status()
     yield
 
