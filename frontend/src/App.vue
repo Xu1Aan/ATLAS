@@ -37,10 +37,10 @@ const loadJob = async (jobId: string) => {
       error.value = null
       selectedJobId.value = jobId
     } else {
-      error.value = 'Failed to load job'
+      error.value = '加载任务失败'
     }
   } catch (e) {
-    error.value = `Error loading job: ${e}`
+    error.value = `加载任务出错：${e}`
   }
 }
 

@@ -2001,3 +2001,211 @@ def get_gpkg_bbox(gpkg_path: Path, table_name: str = "entities") -> tuple[bool, 
         return False, None
     except Exception:
         return False, None
+
+
+def _copy_to_ascii_path_safe(source_path: Path, target_path: Path) -> tuple[bool, str]:
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.resolve() != target_path.resolve():
+            shutil.copy2(source_path, target_path)
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def _prepare_ascii_source_safe(source_path: Path, output_dir: Path, target_name: str) -> tuple[bool, Path | None, str]:
+    target_path = output_dir / target_name
+    ok, err = _copy_to_ascii_path_safe(source_path, target_path)
+    if not ok:
+        return False, None, f"创建中间文件失败: {err}"
+    return True, target_path, ""
+
+
+def _convert_vector_to_gpkg_safe(
+    source_path: Path,
+    output_dir: Path,
+    progress_callback=None,
+    source_label: str = "矢量",
+    require_source_srs: bool = False,
+    probe_layers: bool = True,
+) -> tuple[bool, Path | None, str]:
+    gpkg_path = output_dir / "source.gpkg"
+    source_path = Path(source_path)
+
+    if progress_callback:
+        progress_callback(10, f"正在准备 {source_label} 文件...")
+
+    layer_names: list[str] = []
+    if probe_layers:
+        layer_names = _ogrinfo_layer_names(source_path)
+        if not layer_names:
+            return False, None, f"无法识别 {source_label} 中的图层"
+
+    if require_source_srs:
+        missing_srs = [layer for layer in layer_names if not _ogr_layer_has_declared_srs(source_path, layer)]
+        if missing_srs:
+            return False, None, f"{source_label} 缺少可用坐标系信息: {', '.join(missing_srs)}"
+
+    if gpkg_path.exists():
+        try:
+            gpkg_path.unlink()
+        except Exception as e:
+            return False, None, f"删除已有 GeoPackage 失败: {e}"
+
+    if progress_callback:
+        progress_callback(60, f"正在将 {source_label} 转换为 GeoPackage...")
+
+    cmd = [
+        settings.ogr2ogr_cmd,
+        "-f", "GPKG",
+        str(gpkg_path),
+    ]
+    if source_path.suffix.lower() == ".dxf":
+        cmd.extend([
+            "--config", "DXF_ENCODING", "UTF-8",
+            "--config", "DXF_MERGE_BLOCK_GEOMETRIES", "FALSE",
+            "--config", "DXF_INLINE_BLOCKS", "TRUE",
+            "--config", "DXF_ATTRIBUTES", "TRUE",
+        ])
+    cmd.extend([
+        str(source_path),
+        "-skipfailures",
+        "-t_srs", settings.target_srs,
+        "-lco", "GEOMETRY_NAME=geom",
+    ])
+    ok, err = _run(cmd, cwd=output_dir, timeout=3600)
+    if not ok:
+        return False, None, f"GDAL 转换失败: {err}"
+
+    if progress_callback:
+        progress_callback(100, "转换完成")
+    return True, gpkg_path, ""
+
+
+def _extract_zip_file_safe(zip_path: Path, output_dir: Path) -> tuple[bool, Path | None, str]:
+    extract_dir = output_dir / "extract_src"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir, ignore_errors=True)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            root_dir = extract_dir.resolve()
+            for member in archive.infolist():
+                member_path = (extract_dir / member.filename).resolve()
+                if root_dir not in member_path.parents and member_path != root_dir:
+                    return False, None, "ZIP contains invalid paths"
+            archive.extractall(extract_dir)
+        return True, extract_dir, ""
+    except zipfile.BadZipFile:
+        return False, None, "ZIP 文件无效"
+    except Exception as e:
+        return False, None, f"解压 ZIP 失败: {e}"
+
+
+def _find_shp_main_file_safe(extract_dir: Path, zip_path: Path) -> tuple[Path | None, str]:
+    shp_files = sorted(extract_dir.rglob("*.shp"))
+    if not shp_files:
+        return None, "ZIP 内未找到 .shp 文件"
+
+    zip_stem = zip_path.stem.lower()
+    matches = [path for path in shp_files if path.stem.lower() == zip_stem]
+    candidates = matches or shp_files
+    if len(candidates) > 1:
+        return None, "ZIP 内包含多个 SHP 文件，请只保留一个主图层"
+
+    shp_path = candidates[0]
+    required_suffixes = [".shp", ".shx", ".dbf"]
+    missing = [suffix for suffix in required_suffixes if not shp_path.with_suffix(suffix).exists()]
+    if missing:
+        return None, f"SHP 缺少必要文件: {', '.join(missing)}"
+    if not shp_path.with_suffix(".prj").exists():
+        return None, "SHP 缺少 .prj，无法识别坐标系"
+    return shp_path, ""
+
+
+def _copy_shp_bundle_to_ascii_dir_safe(shp_path: Path, output_dir: Path) -> tuple[bool, Path | None, str]:
+    source_dir = output_dir / "source_shp"
+    if source_dir.exists():
+        shutil.rmtree(source_dir, ignore_errors=True)
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    copied_any = False
+    for item in shp_path.parent.iterdir():
+        if item.is_file() and item.stem.lower() == shp_path.stem.lower():
+            target = source_dir / f"source{item.suffix.lower()}"
+            ok, err = _copy_to_ascii_path_safe(item, target)
+            if not ok:
+                return False, None, f"复制 SHP 组成文件失败: {err}"
+            copied_any = True
+
+    if not copied_any:
+        return False, None, "未找到可复制的 SHP 组成文件"
+
+    ascii_shp = source_dir / "source.shp"
+    if not ascii_shp.exists():
+        return False, None, "复制后的 source.shp 不存在"
+    return True, ascii_shp, ""
+
+
+def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    if progress_callback:
+        progress_callback(10, "正在准备 DXF 文件...")
+
+    ok, target_dxf, err = _prepare_ascii_source_safe(dxf_path, output_dir, "source.dxf")
+    if not ok or not target_dxf:
+        return False, None, err
+
+    try:
+        repair_dxf_encoding(target_dxf)
+    except Exception as e:
+        print(f"Encoding repair warning: {e}")
+
+    return _convert_vector_to_gpkg_safe(
+        target_dxf,
+        output_dir,
+        progress_callback=progress_callback,
+        source_label="DXF",
+        probe_layers=False,
+    )
+
+
+def convert_kml_to_gpkg(kml_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    ok, target_kml, err = _prepare_ascii_source_safe(kml_path, output_dir, "source.kml")
+    if not ok or not target_kml:
+        return False, None, err
+
+    return _convert_vector_to_gpkg_safe(
+        target_kml,
+        output_dir,
+        progress_callback=progress_callback,
+        source_label="KML",
+        require_source_srs=False,
+        probe_layers=True,
+    )
+
+
+def convert_shp_zip_to_gpkg(zip_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:
+    if progress_callback:
+        progress_callback(10, "正在解压 SHP ZIP...")
+
+    ok, extract_dir, err = _extract_zip_file_safe(zip_path, output_dir)
+    if not ok or not extract_dir:
+        return False, None, err
+
+    shp_path, shp_err = _find_shp_main_file_safe(extract_dir, zip_path)
+    if not shp_path:
+        return False, None, shp_err
+
+    ok, ascii_shp, copy_err = _copy_shp_bundle_to_ascii_dir_safe(shp_path, output_dir)
+    if not ok or not ascii_shp:
+        return False, None, copy_err
+
+    return _convert_vector_to_gpkg_safe(
+        ascii_shp,
+        output_dir,
+        progress_callback=progress_callback,
+        source_label="SHP",
+        require_source_srs=True,
+        probe_layers=True,
+    )

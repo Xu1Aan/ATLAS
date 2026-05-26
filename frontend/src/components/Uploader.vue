@@ -16,8 +16,8 @@
   </form>
 
   <div v-if="loading" class="modal-overlay">
-    <div class="modal-content">
-      <h3>正在处理切片...</h3>
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="upload-progress-title">
+      <h3 id="upload-progress-title">正在切片处理中...</h3>
 
       <div class="progress-wrapper">
         <div class="progress-bar-bg">
@@ -34,7 +34,7 @@
 
       <div class="modal-footer">
         <button type="button" @click="showDetails = !showDetails" class="detail-btn">
-          {{ showDetails ? '收起详情' : '详细信息' }}
+          {{ showDetails ? '收起详情' : '查看详情' }}
         </button>
         <button type="button" @click="cancelUpload" class="cancel-btn">取消</button>
       </div>
@@ -79,14 +79,20 @@ const addLog = (msg: string) => {
   }
 }
 
+const resetState = () => {
+  loading.value = false
+  currentJobId.value = null
+  progress.value = 0
+  progressMsg.value = ''
+  logs.value = []
+}
+
 const cancelUpload = () => {
   if (xhr.value) {
     xhr.value.abort()
     xhr.value = null
   }
-  loading.value = false
-  currentJobId.value = null
-  logs.value = []
+  resetState()
   emit('error', '已取消上传')
 }
 
@@ -151,7 +157,6 @@ const onSubmit = async () => {
 
     const req = new XMLHttpRequest()
     xhr.value = req
-
     req.open('POST', `${props.apiBase}/convert`)
 
     req.upload.onprogress = (e) => {
@@ -168,22 +173,22 @@ const onSubmit = async () => {
         try {
           const res = JSON.parse(req.responseText) as ConvertResult
           if (res.status === 'error') {
-            loading.value = false
+            resetState()
             emit('error', res.message || '转换失败')
             return
           }
 
-          addLog('上传完成，等待处理...')
+          addLog('上传完成，等待服务端处理...')
           progress.value = 0
           progressMsg.value = '准备转换...'
           currentJobId.value = res.job_id
           pollStatus(res.job_id)
         } catch {
-          loading.value = false
+          resetState()
           emit('error', '响应解析失败')
         }
       } else {
-        loading.value = false
+        resetState()
         let msg = `请求失败 ${req.status}`
         try {
           const err = JSON.parse(req.responseText)
@@ -195,7 +200,7 @@ const onSubmit = async () => {
 
     req.onerror = () => {
       xhr.value = null
-      loading.value = false
+      resetState()
       emit('error', '网络错误')
     }
 
@@ -205,7 +210,7 @@ const onSubmit = async () => {
 
     req.send(form)
   } catch (err) {
-    loading.value = false
+    resetState()
     emit('error', err instanceof Error ? err.message : '未知错误')
   }
 }
@@ -224,15 +229,15 @@ const onSubmit = async () => {
   align-items: center;
   justify-content: center;
   padding: 6px 12px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
   cursor: pointer;
-  background-color: white;
+  background-color: #fff;
   min-width: 220px;
-  max-width: 300px;
-  height: 36px;
+  max-width: 320px;
+  height: 40px;
   box-sizing: border-box;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
 }
 
 .uploader-label-btn:hover {
@@ -242,7 +247,7 @@ const onSubmit = async () => {
 
 .filename-span {
   font-size: 14px;
-  color: #333;
+  color: #334155;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -254,14 +259,14 @@ const onSubmit = async () => {
 
 .uploader-submit-btn {
   padding: 0 16px;
-  height: 36px;
+  height: 40px;
   background-color: #3b82f6;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 14px;
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: background-color 0.2s ease;
   white-space: nowrap;
 }
 
@@ -277,23 +282,34 @@ const onSubmit = async () => {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.35);
+  background: rgba(15, 23, 42, 0.42);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 16px;
   z-index: 1000;
+  backdrop-filter: blur(4px);
 }
 
 .modal-content {
   width: min(560px, calc(100vw - 32px));
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  max-height: min(78vh, 720px);
+  overflow: auto;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.modal-content h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #0f172a;
 }
 
 .progress-wrapper {
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .progress-bar-bg {
@@ -307,20 +323,21 @@ const onSubmit = async () => {
 .progress-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, #2563eb, #0ea5e9);
+  transition: width 0.2s ease;
 }
 
 .progress-text {
-  margin-top: 8px;
+  margin-top: 10px;
   font-size: 14px;
   color: #475569;
 }
 
 .logs-container {
-  margin-top: 14px;
-  max-height: 200px;
+  margin-top: 16px;
+  max-height: 220px;
   overflow: auto;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
 }
@@ -328,11 +345,11 @@ const onSubmit = async () => {
 .log-item {
   font-size: 13px;
   color: #334155;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .modal-footer {
-  margin-top: 16px;
+  margin-top: 18px;
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -340,11 +357,12 @@ const onSubmit = async () => {
 
 .detail-btn,
 .cancel-btn {
-  padding: 8px 14px;
-  border-radius: 8px;
+  padding: 9px 14px;
+  border-radius: 10px;
   border: 1px solid #cbd5e1;
   background: #fff;
   cursor: pointer;
+  font-size: 14px;
 }
 
 .cancel-btn {

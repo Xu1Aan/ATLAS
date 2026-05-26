@@ -122,7 +122,7 @@ def _load_job(job_id: str) -> dict | None:
     job = {
         "status": "done" if gpkg_path and gpkg_path.exists() else "error",
         "progress": 100 if gpkg_path and gpkg_path.exists() else 0,
-        "message": "Loaded from disk",
+        "message": "已从磁盘恢复任务",
         "original_filename": source_path.name,
         "source_format": source_format,
         "source_path": str(source_path),
@@ -180,7 +180,7 @@ def _convert_source_to_gpkg(source_format: str, source_path: Path, job_dir: Path
     return converters[source_format](source_path, job_dir, progress_callback=progress_callback)
 
 
-def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, original_filename: str, source_format: str):
+def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, source_format: str):
     """Background conversion and GeoServer publishing."""
 
     def update_progress(percent: int, msg: str):
@@ -262,6 +262,7 @@ async def list_jobs():
         source_path = _first_supported_source(job_dir)
         if not job or not source_path:
             continue
+
         jobs_list.append(
             {
                 "job_id": job_id,
@@ -302,10 +303,10 @@ def upload_and_convert(file: UploadFile = File(...), background_tasks: Backgroun
         return _job_response(job_id)
 
     start_message = {
-        "dwg": "正在转换 DWG → DXF → GeoPackage",
-        "dxf": "正在转换 DXF → GeoPackage",
-        "kml": "正在转换 KML → GeoPackage",
-        "shp_zip": "正在解压 SHP(zip) → GeoPackage",
+        "dwg": "正在转换 DWG -> DXF -> GeoPackage",
+        "dxf": "正在转换 DXF -> GeoPackage",
+        "kml": "正在转换 KML -> GeoPackage",
+        "shp_zip": "正在解压 SHP(zip) -> GeoPackage",
     }[source_format]
 
     _jobs[job_id] = {
@@ -327,9 +328,9 @@ def upload_and_convert(file: UploadFile = File(...), background_tasks: Backgroun
     _persist_job(job_id)
 
     if background_tasks:
-        background_tasks.add_task(process_conversion_task, job_id, source_path, job_dir, file.filename, source_format)
+        background_tasks.add_task(process_conversion_task, job_id, source_path, job_dir, source_format)
     else:
-        process_conversion_task(job_id, source_path, job_dir, file.filename, source_format)
+        process_conversion_task(job_id, source_path, job_dir, source_format)
 
     return _job_response(job_id)
 
@@ -355,7 +356,7 @@ async def get_job_layers(job_id: str):
         gpkg_path = _find_job_artifact(_job_dir(job_id), "*.gpkg")
 
     if not gpkg_path or not gpkg_path.exists():
-        raise HTTPException(404, "GeoPackage file not found")
+        raise HTTPException(404, "GeoPackage 文件不存在")
 
     return conversion.get_gpkg_layers(gpkg_path)
 
