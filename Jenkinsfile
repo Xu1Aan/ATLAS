@@ -43,6 +43,12 @@ pipeline {
         BACKEND_GEOSERVER_PUBLIC_URL = 'http://10.20.124.50:30030/public/dwgconvert/geoserver'
         BACKEND_GEOSERVER_USER = 'admin'
         BACKEND_GEOSERVER_PASSWORD = 'geoserver'
+        BACKEND_MINIO_ENDPOINT = 'http://10.20.124.73:9000'
+        BACKEND_MINIO_ACCESS_KEY = 'VyKNZUaCYan5nQ23LsHB'
+        BACKEND_MINIO_SECRET_KEY = 'VL2K8AAyo9x0VLOVmJb7yRoRLqrqJvjJ64oHqaAz'
+        BACKEND_MINIO_SECURE = 'false'
+        BACKEND_MINIO_PATH_STYLE = 'true'
+        BACKEND_MINIO_REGION = ''
     }
 
     stages {
@@ -149,7 +155,19 @@ docker push ${remoteImage}
                             ",env[3].name=APP_GEOSERVER_USER" +
                             ",env[3].value=${env.BACKEND_GEOSERVER_USER}" +
                             ",env[4].name=APP_GEOSERVER_PASSWORD" +
-                            ",env[4].value=${env.BACKEND_GEOSERVER_PASSWORD}"
+                            ",env[4].value=${env.BACKEND_GEOSERVER_PASSWORD}" +
+                            ",env[5].name=APP_MINIO_ENDPOINT" +
+                            ",env[5].value=${env.BACKEND_MINIO_ENDPOINT}" +
+                            ",env[6].name=APP_MINIO_ACCESS_KEY" +
+                            ",env[6].value=${env.BACKEND_MINIO_ACCESS_KEY}" +
+                            ",env[7].name=APP_MINIO_SECRET_KEY" +
+                            ",env[7].value=${env.BACKEND_MINIO_SECRET_KEY}" +
+                            ",env[8].name=APP_MINIO_SECURE" +
+                            ",env[8].value=${env.BACKEND_MINIO_SECURE}" +
+                            ",env[9].name=APP_MINIO_PATH_STYLE" +
+                            ",env[9].value=${env.BACKEND_MINIO_PATH_STYLE}" +
+                            ",env[10].name=APP_MINIO_REGION" +
+                            ",env[10].value=${env.BACKEND_MINIO_REGION}"
 
                         def helmCmdPrimary =
                             'helm upgrade --install ' +
