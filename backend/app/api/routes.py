@@ -456,18 +456,39 @@ async def get_status(job_id: str):
 
 @router.get("/layers/{job_id}", response_model=list[dict])
 async def get_job_layers(job_id: str):
-    gpkg_path = None
     job = _load_job(job_id)
-    if job and job.get("gpkg_path"):
-        gpkg_path = Path(job["gpkg_path"])
+    if not job:
+        raise HTTPException(404, "任务不存在")
 
+    source_format = job.get("source_format")
+    if source_format in {"kml", "shp_zip"}:
+        published_layers = job.get("layers") or []
+        return [
+            {
+                "name": layer.get("native_layer_name") or layer.get("layer_name"),
+                "color": "#2563eb",
+                "kind": "published-layer",
+            }
+            for layer in published_layers
+            if layer.get("native_layer_name") or layer.get("layer_name")
+        ]
+
+    gpkg_path = None
+    if job.get("gpkg_path"):
+        gpkg_path = Path(job["gpkg_path"])
     if not gpkg_path:
         gpkg_path = _find_job_artifact(_job_dir(job_id), "*.gpkg")
 
     if not gpkg_path or not gpkg_path.exists():
         raise HTTPException(404, "GeoPackage 文件不存在")
 
-    return conversion.get_gpkg_layers(gpkg_path)
+    return [
+        {
+            **layer,
+            "kind": "cad-layer",
+        }
+        for layer in conversion.get_gpkg_layers(gpkg_path)
+    ]
 
 
 @router.get("/convert/{job_id}/gpkg")

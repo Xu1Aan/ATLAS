@@ -20,10 +20,12 @@ class Settings(BaseSettings):
     geoserver_password: str = "geoserver"
     geoserver_workspace: str = "dwg"
     geoserver_public_url: str = "http://10.20.124.50:30030/public/dwgconvert/geoserver"
-    minio_endpoint: str = "http://10.20.124.71:30901"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
+    minio_endpoint: str = "http://10.20.124.73:9000"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
     minio_secure: bool | None = None
+    minio_region: str | None = None
+    minio_path_style: bool = True
 
     class Config:
         env_prefix = "APP_"

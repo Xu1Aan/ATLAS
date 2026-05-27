@@ -36,6 +36,6 @@ class ConvertResponse(BaseModel):
 class MinioConvertRequest(BaseModel):
     """Request body for converting a source file stored in MinIO."""
 
-    bucket_name: str = Field("swdg", description="MinIO bucket name")
+    bucket_name: str = Field(..., description="MinIO bucket name")
     object_name: str = Field(..., description="MinIO object key")
     filename: str | None = Field(None, description="Optional local filename override")
