@@ -85,7 +85,7 @@ const logs = ref<string[]>([])
 const currentJobId = ref<string | null>(null)
 const xhr = ref<XMLHttpRequest | null>(null)
 
-const minioBucket = ref('')
+const minioBucket = ref('swdg')
 const minioObjectKey = ref('')
 const minioFilename = ref('')
 
