@@ -35,6 +35,11 @@ async def lifespan(_: FastAPI):
     logger.info("minio_endpoint=%s", settings.minio_endpoint)
     logger.info("minio_secure=%s", settings.minio_secure)
     logger.info("minio_path_style=%s", settings.minio_path_style)
+    logger.info(
+        "minio_credentials_configured access_key=%s secret_key=%s",
+        bool(settings.minio_access_key),
+        bool(settings.minio_secret_key),
+    )
     _log_dependency_status()
     yield
 
