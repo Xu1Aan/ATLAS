@@ -69,8 +69,8 @@ onMounted(() => {
       <h1 class="app-title">图纸切片发布</h1>
       <div class="header-actions">
         <Uploader :api-base="API_BASE" @convert="onConvert" @error="onError" />
-        <div class="job-selector" v-if="jobs.length > 0">
-          <label>已上传：</label>
+        <div v-if="jobs.length > 0" class="job-selector">
+          <label>历史任务：</label>
           <select v-model="selectedJobId" @change="loadJob(selectedJobId)">
             <option value="" disabled>选择任务...</option>
             <option v-for="job in jobs" :key="job.job_id" :value="job.job_id">
@@ -81,7 +81,7 @@ onMounted(() => {
       </div>
     </div>
     <p class="app-sub">
-      支持 DWG / DXF / SHP(zip) / KML 上传，统一转换为 GeoPackage 并发布到 GeoServer MVT / WMTS
+      支持本地上传或从 MinIO 导入 DWG / DXF / SHP(zip) / KML，统一转换为 GeoPackage 并发布到 GeoServer。
     </p>
   </header>
 
@@ -100,13 +100,13 @@ onMounted(() => {
 .header-top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 20px;
 }
 
 .header-actions {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 15px;
 }
 
@@ -114,13 +114,14 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-top: 8px;
 }
 
 .job-selector select {
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid #ccc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
   font-size: 14px;
-  min-width: 200px;
+  min-width: 240px;
 }
 </style>

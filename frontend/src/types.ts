@@ -6,6 +6,12 @@ export interface PublishedLayer {
   bbox?: number[]
 }
 
+export interface LayerListItem {
+  name: string
+  color?: string
+  kind?: 'cad-layer' | 'published-layer'
+}
+
 export interface ConvertResult {
   job_id: string
   status: string
@@ -21,4 +27,10 @@ export interface ConvertResult {
   raster_url?: string
   wmts_url?: string
   bbox?: number[]
+}
+
+export interface MinioConvertRequest {
+  bucket_name: string
+  object_name: string
+  filename?: string
 }

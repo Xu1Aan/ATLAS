@@ -1,19 +1,39 @@
 <template>
-  <form @submit.prevent="onSubmit" class="uploader-form">
-    <label class="uploader-label-btn" :title="file ? file.name : '点击选择文件'">
-      <span class="filename-span">{{ file ? file.name : '选择 DWG / DXF / SHP(zip) / KML' }}</span>
-      <input
-        type="file"
-        accept=".dwg,.dxf,.kml,.zip"
-        @change="onFileChange"
-        :disabled="loading"
-        class="uploader-input"
-      />
-    </label>
-    <button type="submit" :disabled="loading || !file" class="uploader-submit-btn">
-      {{ loading ? '处理中...' : '上传转换' }}
-    </button>
-  </form>
+  <div class="uploader-shell">
+    <div class="mode-switch">
+      <button type="button" class="mode-btn" :class="{ active: mode === 'local' }" @click="mode = 'local'">
+        本地上传
+      </button>
+      <button type="button" class="mode-btn" :class="{ active: mode === 'minio' }" @click="mode = 'minio'">
+        MinIO 导入
+      </button>
+    </div>
+
+    <form v-if="mode === 'local'" class="uploader-form" @submit.prevent="onSubmitLocal">
+      <label class="uploader-label-btn" :title="file ? file.name : '点击选择文件'">
+        <span class="filename-span">{{ file ? file.name : '选择 DWG / DXF / SHP(zip) / KML' }}</span>
+        <input
+          type="file"
+          accept=".dwg,.dxf,.kml,.zip"
+          :disabled="loading"
+          class="uploader-input"
+          @change="onFileChange"
+        />
+      </label>
+      <button type="submit" :disabled="loading || !file" class="uploader-submit-btn">
+        {{ loading ? '处理中...' : '上传转换' }}
+      </button>
+    </form>
+
+    <form v-else class="minio-form" @submit.prevent="onSubmitMinio">
+      <input v-model.trim="minioBucket" :disabled="loading" class="minio-input" placeholder="Bucket 名称" />
+      <input v-model.trim="minioObjectKey" :disabled="loading" class="minio-input minio-key" placeholder="Object Key，例如 folder/test.dwg" />
+      <input v-model.trim="minioFilename" :disabled="loading" class="minio-input" placeholder="文件名（可选）" />
+      <button type="submit" :disabled="loading || !minioBucket || !minioObjectKey" class="uploader-submit-btn">
+        {{ loading ? '处理中...' : '导入转换' }}
+      </button>
+    </form>
+  </div>
 
   <div v-if="loading" class="modal-overlay">
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="upload-progress-title">
@@ -33,10 +53,10 @@
       </div>
 
       <div class="modal-footer">
-        <button type="button" @click="showDetails = !showDetails" class="detail-btn">
+        <button type="button" class="detail-btn" @click="showDetails = !showDetails">
           {{ showDetails ? '收起详情' : '查看详情' }}
         </button>
-        <button type="button" @click="cancelUpload" class="cancel-btn">取消</button>
+        <button type="button" class="cancel-btn" @click="cancelUpload">取消</button>
       </div>
     </div>
   </div>
@@ -44,7 +64,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { ConvertResult } from '../types'
+import type { ConvertResult, MinioConvertRequest } from '../types'
 
 const props = defineProps<{
   apiBase: string
@@ -55,6 +75,7 @@ const emit = defineEmits<{
   (e: 'error', msg: string): void
 }>()
 
+const mode = ref<'local' | 'minio'>('local')
 const loading = ref(false)
 const progress = ref(0)
 const progressMsg = ref('')
@@ -63,6 +84,10 @@ const showDetails = ref(false)
 const logs = ref<string[]>([])
 const currentJobId = ref<string | null>(null)
 const xhr = ref<XMLHttpRequest | null>(null)
+
+const minioBucket = ref('')
+const minioObjectKey = ref('')
+const minioFilename = ref('')
 
 const allowedExtensions = ['.dwg', '.dxf', '.kml', '.zip']
 
@@ -93,7 +118,7 @@ const cancelUpload = () => {
     xhr.value = null
   }
   resetState()
-  emit('error', '已取消上传')
+  emit('error', '已取消请求')
 }
 
 const pollStatus = async (jobId: string) => {
@@ -136,7 +161,30 @@ const pollStatus = async (jobId: string) => {
   poll()
 }
 
-const onSubmit = async () => {
+const beginLoading = (initialLog: string, initialProgress: string) => {
+  loading.value = true
+  progress.value = 0
+  progressMsg.value = initialProgress
+  logs.value = [initialLog]
+  showDetails.value = false
+  emit('error', '')
+}
+
+const handleAcceptedResponse = (res: ConvertResult, nextMessage: string) => {
+  if (res.status === 'error') {
+    resetState()
+    emit('error', res.message || '转换失败')
+    return
+  }
+
+  addLog(nextMessage)
+  progress.value = 0
+  progressMsg.value = '等待后台转换...'
+  currentJobId.value = res.job_id
+  pollStatus(res.job_id)
+}
+
+const onSubmitLocal = async () => {
   const lowerName = file.value?.name.toLowerCase() || ''
   const isSupported = allowedExtensions.some((ext) => lowerName.endsWith(ext))
   if (!file.value || !isSupported) {
@@ -144,12 +192,7 @@ const onSubmit = async () => {
     return
   }
 
-  loading.value = true
-  progress.value = 0
-  progressMsg.value = '正在上传...'
-  logs.value = ['开始上传...']
-  showDetails.value = false
-  emit('error', '')
+  beginLoading('开始上传本地文件...', '正在上传...')
 
   try {
     const form = new FormData()
@@ -172,17 +215,7 @@ const onSubmit = async () => {
       if (req.status >= 200 && req.status < 300) {
         try {
           const res = JSON.parse(req.responseText) as ConvertResult
-          if (res.status === 'error') {
-            resetState()
-            emit('error', res.message || '转换失败')
-            return
-          }
-
-          addLog('上传完成，等待服务端处理...')
-          progress.value = 0
-          progressMsg.value = '等待后台转换...'
-          currentJobId.value = res.job_id
-          pollStatus(res.job_id)
+          handleAcceptedResponse(res, '上传完成，等待服务端处理...')
         } catch {
           resetState()
           emit('error', '响应解析失败')
@@ -214,10 +247,83 @@ const onSubmit = async () => {
     emit('error', err instanceof Error ? err.message : '未知错误')
   }
 }
+
+const onSubmitMinio = async () => {
+  const effectiveName = (minioFilename.value || minioObjectKey.value.split('/').pop() || '').toLowerCase()
+  const isSupported = allowedExtensions.some((ext) => effectiveName.endsWith(ext))
+  if (!minioBucket.value || !minioObjectKey.value || !isSupported) {
+    emit('error', '请填写 bucket、object key，并确保对象是 DWG / DXF / SHP(zip) / KML')
+    return
+  }
+
+  beginLoading('开始请求 MinIO 导入...', '等待 MinIO 下载...')
+
+  const payload: MinioConvertRequest = {
+    bucket_name: minioBucket.value,
+    object_name: minioObjectKey.value,
+    filename: minioFilename.value || undefined
+  }
+
+  try {
+    const res = await fetch(`${props.apiBase}/convert/minio`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+
+    if (!res.ok) {
+      resetState()
+      let msg = `请求失败 ${res.status}`
+      try {
+        const err = await res.json()
+        msg = err.detail?.msg || err.detail || err.message || msg
+      } catch {}
+      emit('error', msg)
+      return
+    }
+
+    const body = await res.json() as ConvertResult
+    handleAcceptedResponse(body, 'MinIO 请求已接收，等待服务端下载并转换...')
+  } catch (err) {
+    resetState()
+    emit('error', err instanceof Error ? err.message : '未知错误')
+  }
+}
 </script>
 
 <style scoped>
-.uploader-form {
+.uploader-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 520px;
+}
+
+.mode-switch {
+  display: flex;
+  gap: 8px;
+}
+
+.mode-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mode-btn.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+.uploader-form,
+.minio-form {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -233,8 +339,8 @@ const onSubmit = async () => {
   border-radius: 8px;
   cursor: pointer;
   background-color: #fff;
-  min-width: 220px;
-  max-width: 320px;
+  min-width: 240px;
+  max-width: 360px;
   height: 40px;
   box-sizing: border-box;
   transition: all 0.2s ease;
@@ -255,6 +361,19 @@ const onSubmit = async () => {
 
 .uploader-input {
   display: none;
+}
+
+.minio-input {
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  padding: 0 12px;
+  font-size: 14px;
+  min-width: 140px;
+}
+
+.minio-key {
+  min-width: 280px;
 }
 
 .uploader-submit-btn {
