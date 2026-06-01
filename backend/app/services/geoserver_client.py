@@ -1718,7 +1718,7 @@ def publish_gpkg_layers(
         ws = settings.geoserver_workspace
         headers = _auth_headers()
         published_layers: list[dict] = []
-        from app.services.raster_publish import RasterPublishState, setup_layer_raster
+        from app.services.raster_publish import RasterPublishState
 
         raster_state = RasterPublishState()
 
@@ -1810,6 +1810,12 @@ def publish_gpkg_layers(
                     json=layer_body,
                 )
 
+                ok_gwc, msg_gwc = enable_gwc_mvt(layer_name)
+                if not ok_gwc:
+                    return False, [], f"GWC tile config failed for {layer_name}: {msg_gwc}"
+
+                from app.services.raster_publish import setup_layer_raster, sync_gwc_raster_styles
+
                 raster_outcome = setup_layer_raster(
                     source_format,
                     client,
@@ -1824,15 +1830,13 @@ def publish_gpkg_layers(
                 if raster_outcome.fatal_error:
                     return False, [], raster_outcome.fatal_error
 
+                sync_gwc_raster_styles(layer_name, raster_outcome)
+
                 raster_url = raster_outcome.raster_url
                 raster_enabled = raster_outcome.raster_enabled
                 raster_message = raster_outcome.raster_message
                 raster_style_kind = raster_outcome.raster_style
                 missing_columns = raster_outcome.missing_columns
-
-                ok_gwc, msg_gwc = enable_gwc_mvt(layer_name)
-                if not ok_gwc:
-                    return False, [], f"GWC tile config failed for {layer_name}: {msg_gwc}"
 
                 ok_truncate, msg_truncate = truncate_gwc_layer(layer_name)
                 if not ok_truncate:

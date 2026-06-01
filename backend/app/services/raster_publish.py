@@ -32,6 +32,30 @@ class RasterPublishState:
     shp_ready: bool = False
 
 
+def sync_gwc_raster_styles(layer_name: str, outcome: LayerRasterOutcome) -> None:
+    """Register raster WMTS styles on GWC after enable_gwc_mvt resets the layer config."""
+    if not outcome.raster_enabled:
+        return
+
+    if outcome.raster_style == "dwg":
+        gs._update_gwc_layer_styles(layer_name, "dwg_raster_style")
+        return
+
+    if outcome.raster_style in ("kml", "kml_styled"):
+        gs._update_gwc_layer_styles(layer_name, "kml_raster_style")
+        if outcome.kml_raster_styled:
+            gs._update_gwc_layer_styles(layer_name, "kml_raster_styled")
+        return
+
+    if outcome.raster_style in ("shp", "shp_labeled"):
+        gs._update_gwc_layer_styles(layer_name, shp_raster.SHP_RASTER_STYLE_NAME)
+        if (
+            outcome.shp_wmts_style
+            and outcome.shp_wmts_style != shp_raster.SHP_RASTER_STYLE_NAME
+        ):
+            gs._update_gwc_layer_styles(layer_name, outcome.shp_wmts_style)
+
+
 def resolve_layer_raster_url(
     gpkg_path: Path,
     native_layer_name: str,
