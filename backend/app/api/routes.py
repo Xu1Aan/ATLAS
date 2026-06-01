@@ -62,24 +62,24 @@ def _layer_name_for(job_id: str, native_layer_name: str, index: int) -> str:
     return f"layer_{job_id}_{index}_{_safe_layer_token(native_layer_name)}"
 
 
-def _layer_raster_url(gpkg_path: Path, native_layer_name: str, layer_name: str) -> str | None:
-    raster_enabled, _missing_columns = gs.get_raster_style_compatibility(gpkg_path, native_layer_name)
-    if not raster_enabled:
-        return None
-    return gs.get_raster_url_v2(layer_name)
+def _layer_raster_url(gpkg_path: Path, native_layer_name: str, layer_name: str) -> str:
+    raster_url, _uses_cad_raster = gs.resolve_layer_raster_url(
+        gpkg_path, native_layer_name, layer_name
+    )
+    return raster_url
 
 
 def _build_done_message(published_layers: list[dict]) -> str:
-    disabled = [
+    generic_raster = [
         layer for layer in published_layers
-        if layer.get("mvt_url") and not layer.get("raster_url")
+        if layer.get("mvt_url") and not layer.get("raster_enabled", True)
     ]
-    if not disabled:
+    if not generic_raster:
         return "转换并发布完成"
 
-    names = ", ".join(layer["native_layer_name"] for layer in disabled[:3])
-    suffix = " 等图层" if len(disabled) > 3 else ""
-    return f"转换完成，矢量切片可用；{names}{suffix} 未启用栅格样式"
+    names = ", ".join(layer["native_layer_name"] for layer in generic_raster[:3])
+    suffix = " 等图层" if len(generic_raster) > 3 else ""
+    return f"转换完成；{names}{suffix} 使用默认栅格样式（未提取完整 CAD 样式字段）"
 
 
 def _persist_job(job_id: str) -> None:

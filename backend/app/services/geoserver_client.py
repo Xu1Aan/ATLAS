@@ -1071,6 +1071,24 @@ def add_raster_style_to_layer(layer_name: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+def resolve_layer_raster_url(
+    gpkg_path: Path,
+    native_layer_name: str,
+    layer_name: str,
+) -> tuple[str, bool]:
+    """
+    Build a Mapbox/XYZ-compatible WMTS GetTile URL for the layer.
+
+    When CAD raster columns are present, use dwg_raster_style; otherwise fall back to
+    dwg_generic_style so KML/SHP layers still get PNG tiles from the same WMTS endpoint
+    as wmts_url (GetCapabilities).
+    """
+    raster_enabled, _missing = get_raster_style_compatibility(gpkg_path, native_layer_name)
+    if raster_enabled:
+        return get_raster_url_v2(layer_name), True
+    return get_raster_url(layer_name), False
+
+
 def get_raster_url_v2(layer_name: str) -> str:
     """Return XYZ raster tile URL using the new dwg_raster_style"""
     base = _public_geoserver_base().rstrip("/")
@@ -1369,7 +1387,6 @@ def publish_gpkg_layers(
                 )
 
                 raster_enabled, missing_columns = get_raster_style_compatibility(gpkg_path, native_name)
-                raster_url = None
                 raster_message = None
                 if raster_enabled:
                     if not raster_style_ready:
@@ -1383,8 +1400,9 @@ def publish_gpkg_layers(
                         return False, [], f"Attach raster style failed for {layer_name}: {msg_style_attach}"
                     raster_url = get_raster_url_v2(layer_name)
                 else:
+                    raster_url = get_raster_url(layer_name)
                     raster_message = (
-                        "未启用栅格样式，缺少字段: "
+                        "使用默认栅格样式（dwg_generic_style），缺少字段: "
                         + ", ".join(missing_columns)
                     )
 
