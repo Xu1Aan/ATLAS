@@ -971,6 +971,7 @@ def enable_gwc_mvt(layer_name: str) -> tuple[bool, str]:
         ET.SubElement(values, "string").text = f"{ws}:dwg_generic_style"
         ET.SubElement(values, "string").text = f"{ws}:dwg_raster_style"
         ET.SubElement(values, "string").text = f"{ws}:kml_raster_style"
+        ET.SubElement(values, "string").text = f"{ws}:kml_raster_styled"
         
         xml_body = ET.tostring(root, encoding="unicode")
 
@@ -1379,27 +1380,21 @@ def _build_raster_wmts_url(layer_name: str, style_name: str) -> str:
     )
 
 
-def get_kml_raster_url(layer_name: str) -> str:
-    """Return XYZ raster tile URL using kml_raster_style."""
-    return _build_raster_wmts_url(layer_name, "kml_raster_style")
+KML_RASTER_STYLE_NAME = "kml_raster_style"
+KML_RASTER_STYLED_STYLE_NAME = "kml_raster_styled"
 
 
-def pick_kml_raster_sld(gpkg_path: Path, table_name: str) -> str:
-    """Use color-aware SLD only when those columns exist in the GeoPackage."""
-    columns = _get_gpkg_layer_columns(gpkg_path, table_name)
-    if KML_STYLE_COLOR_COLUMNS <= columns:
-        return KML_RASTER_SLD_STYLED
-    return KML_RASTER_SLD_BASIC
+def get_kml_raster_url(layer_name: str, styled: bool = False) -> str:
+    """Return XYZ raster tile URL for KML (basic or color-aware style)."""
+    style_name = KML_RASTER_STYLED_STYLE_NAME if styled else KML_RASTER_STYLE_NAME
+    return _build_raster_wmts_url(layer_name, style_name)
 
 
-def ensure_kml_raster_style(sld_body: str | None = None) -> tuple[bool, str]:
-    """Ensure kml_raster_style exists for KML raster tiles."""
+def _upsert_workspace_style(style_name: str, sld_content: str) -> tuple[bool, str]:
     try:
-        style_name = "kml_raster_style"
         ws = settings.geoserver_workspace
         base = settings.geoserver_url.rstrip("/")
         url = f"{base}/rest/workspaces/{ws}/styles/{style_name}.json"
-        sld_content = sld_body or KML_RASTER_SLD_BASIC
 
         with httpx.Client(timeout=30.0) as client:
             h_sld = {**_auth_headers(), "Content-Type": "application/vnd.ogc.sld+xml"}
@@ -1421,13 +1416,61 @@ def ensure_kml_raster_style(sld_body: str | None = None) -> tuple[bool, str]:
             )
             if r2.status_code in (200, 201):
                 return True, ""
-            return False, f"Create KML raster style failed: {r2.status_code} {r2.text[:200]}"
+            return False, f"Create style {style_name} failed: {r2.status_code} {r2.text[:200]}"
     except Exception as e:
         return False, str(e)
 
 
-def add_kml_raster_style_to_layer(layer_name: str) -> tuple[bool, str]:
-    """Attach kml_raster_style without changing the default MVT style."""
+def ensure_kml_raster_style() -> tuple[bool, str]:
+    """Ensure the shared basic KML raster style (Name/description only)."""
+    return _upsert_workspace_style(KML_RASTER_STYLE_NAME, KML_RASTER_SLD_BASIC)
+
+
+def ensure_kml_raster_styled_style() -> tuple[bool, str]:
+    """Ensure the optional color-aware KML raster style."""
+    return _upsert_workspace_style(KML_RASTER_STYLED_STYLE_NAME, KML_RASTER_SLD_STYLED)
+
+
+def _get_featuretype_attribute_names(
+    client: httpx.Client,
+    ws: str,
+    store_name: str,
+    layer_name: str,
+    headers: dict,
+) -> set[str]:
+    ft_url = _rest(f"workspaces/{ws}/datastores/{store_name}/featuretypes/{layer_name}.json")
+    r = client.get(ft_url, headers=headers)
+    if r.status_code != 200:
+        return set()
+    attrs = r.json().get("featureType", {}).get("attributes", {}).get("attribute", [])
+    return {item["name"] for item in attrs if item.get("name")}
+
+
+def _recalculate_featuretype_attributes(
+    client: httpx.Client,
+    ws: str,
+    store_name: str,
+    layer_name: str,
+    headers: dict,
+) -> None:
+    ft_url = _rest(f"workspaces/{ws}/datastores/{store_name}/featuretypes/{layer_name}.json")
+    client.put(ft_url, params={"recalculate": "attributes"}, headers=headers)
+
+
+def _kml_layer_use_styled_raster(
+    gpkg_path: Path,
+    native_name: str,
+    geoserver_attributes: set[str],
+) -> bool:
+    gpkg_columns = _get_gpkg_layer_columns(gpkg_path, native_name)
+    return (
+        KML_STYLE_COLOR_COLUMNS <= gpkg_columns
+        and KML_STYLE_COLOR_COLUMNS <= geoserver_attributes
+    )
+
+
+def add_kml_raster_style_to_layer(layer_name: str, use_styled: bool = False) -> tuple[bool, str]:
+    """Attach KML raster style(s) without changing the default MVT style."""
     try:
         ws = settings.geoserver_workspace
         base = settings.geoserver_url.rstrip("/")
@@ -1436,22 +1479,25 @@ def add_kml_raster_style_to_layer(layer_name: str) -> tuple[bool, str]:
         if not ok:
             return False, msg
 
+        style_entries = [
+            {"name": "dwg_generic_style", "workspace": ws},
+            {"name": KML_RASTER_STYLE_NAME, "workspace": ws},
+        ]
+        if use_styled:
+            ok_styled, msg_styled = ensure_kml_raster_styled_style()
+            if not ok_styled:
+                return False, msg_styled
+            style_entries.append({"name": KML_RASTER_STYLED_STYLE_NAME, "workspace": ws})
+
         layer_url = f"{base}/rest/workspaces/{ws}/layers/{layer_name}.json"
         with httpx.Client(timeout=30.0) as client:
             h = {**_auth_headers(), "Content-Type": "application/json"}
-            layer_body = {
-                "layer": {
-                    "styles": {
-                        "style": [
-                            {"name": "dwg_generic_style", "workspace": ws},
-                            {"name": "kml_raster_style", "workspace": ws},
-                        ]
-                    }
-                }
-            }
+            layer_body = {"layer": {"styles": {"style": style_entries}}}
             r = client.put(layer_url, headers=h, json=layer_body)
             if r.status_code == 200:
-                _update_gwc_layer_styles(layer_name, "kml_raster_style")
+                _update_gwc_layer_styles(layer_name, KML_RASTER_STYLE_NAME)
+                if use_styled:
+                    _update_gwc_layer_styles(layer_name, KML_RASTER_STYLED_STYLE_NAME)
                 return True, ""
             return False, f"Update layer KML styles failed: {r.status_code} {r.text[:200]}"
     except Exception as e:
@@ -1632,6 +1678,7 @@ def resolve_layer_raster_url(
     native_layer_name: str,
     layer_name: str,
     source_format: str | None = None,
+    kml_raster_styled: bool = False,
 ) -> str | None:
     """Pick DWG or KML raster tile template based on GPKG columns and source format."""
     cad_ok, _ = get_raster_style_compatibility(gpkg_path, native_layer_name)
@@ -1640,7 +1687,7 @@ def resolve_layer_raster_url(
     if source_format == "kml":
         kml_ok, _ = get_kml_raster_style_compatibility(gpkg_path, native_layer_name)
         if kml_ok:
-            return get_kml_raster_url(layer_name)
+            return get_kml_raster_url(layer_name, styled=kml_raster_styled)
     return None
 
 
@@ -1775,21 +1822,30 @@ def publish_gpkg_layers(
                 elif source_format == "kml":
                     kml_ok, kml_missing = get_kml_raster_style_compatibility(gpkg_path, native_name)
                     if kml_ok:
-                        kml_sld = pick_kml_raster_sld(gpkg_path, native_name)
+                        _recalculate_featuretype_attributes(
+                            client, ws, store_name, layer_name, headers
+                        )
+                        gs_attributes = _get_featuretype_attribute_names(
+                            client, ws, store_name, layer_name, headers
+                        )
+                        use_styled = _kml_layer_use_styled_raster(
+                            gpkg_path, native_name, gs_attributes
+                        )
+
                         if not kml_raster_style_ready:
-                            ok_kml_style, msg_kml_style = ensure_kml_raster_style(kml_sld)
+                            ok_kml_style, msg_kml_style = ensure_kml_raster_style()
                             if not ok_kml_style:
                                 return False, [], f"KML raster style creation failed: {msg_kml_style}"
                             kml_raster_style_ready = True
-                        else:
-                            ensure_kml_raster_style(kml_sld)
 
-                        ok_kml_attach, msg_kml_attach = add_kml_raster_style_to_layer(layer_name)
+                        ok_kml_attach, msg_kml_attach = add_kml_raster_style_to_layer(
+                            layer_name, use_styled=use_styled
+                        )
                         if not ok_kml_attach:
                             return False, [], f"Attach KML raster style failed for {layer_name}: {msg_kml_attach}"
-                        raster_url = get_kml_raster_url(layer_name)
+                        raster_url = get_kml_raster_url(layer_name, styled=use_styled)
                         raster_enabled = True
-                        raster_style_kind = "kml"
+                        raster_style_kind = "kml_styled" if use_styled else "kml"
                         missing_columns = []
                     else:
                         raster_message = (
@@ -1817,6 +1873,7 @@ def publish_gpkg_layers(
                         "raster_url": raster_url,
                         "raster_enabled": raster_enabled,
                         "raster_style": raster_style_kind,
+                        "kml_raster_styled": raster_style_kind == "kml_styled",
                         "raster_message": raster_message,
                         "missing_raster_columns": missing_columns,
                         "bbox": list(bbox) if bbox else None,

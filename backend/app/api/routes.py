@@ -67,12 +67,14 @@ def _layer_raster_url(
     native_layer_name: str,
     layer_name: str,
     source_format: str | None = None,
+    kml_raster_styled: bool = False,
 ) -> str | None:
     return gs.resolve_layer_raster_url(
         gpkg_path,
         native_layer_name,
         layer_name,
         source_format=source_format,
+        kml_raster_styled=kml_raster_styled,
     )
 
 
@@ -127,14 +129,11 @@ def _load_job(job_id: str) -> dict | None:
     if not source_path:
         return None
 
-    source_format = SUPPORTED_EXTENSIONS.get(source_path.suffix.lower())
+    source_format = SUPPORTED_EXTENSIONS.get(source_path.suffix.lower()) if source_path else None
     layers = None
     primary_layer_name = None
     primary_bbox = None
-
-    source_format = None
-    if source_path:
-        source_format = SUPPORTED_EXTENSIONS.get(source_path.suffix.lower())
+    primary_kml_raster_styled = False
 
     if gpkg_path and gpkg_path.exists():
         native_layers = conversion.get_gpkg_feature_layers(gpkg_path)
@@ -151,6 +150,7 @@ def _load_job(job_id: str) -> dict | None:
                     native_layer_name,
                     layer_name,
                     source_format=source_format,
+                    kml_raster_styled=False,
                 ),
                 "bbox": bbox if ok_bbox else None,
             }
@@ -158,6 +158,7 @@ def _load_job(job_id: str) -> dict | None:
             if index == 0:
                 primary_layer_name = layer_name
                 primary_bbox = layer_info["bbox"]
+                primary_kml_raster_styled = False
 
     job = {
         "status": "done" if gpkg_path and gpkg_path.exists() else "error",
@@ -177,6 +178,7 @@ def _load_job(job_id: str) -> dict | None:
                 native_layers[0],
                 primary_layer_name,
                 source_format=source_format,
+                kml_raster_styled=primary_kml_raster_styled,
             )
             if primary_layer_name and gpkg_path and gpkg_path.exists() and native_layers
             else None
