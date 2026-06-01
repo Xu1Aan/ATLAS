@@ -541,7 +541,9 @@ DWG_RASTER_SLD = """<?xml version="1.0" encoding="ISO-8859-1"?>
 </StyledLayerDescriptor>
 """
 
-KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
+# GeoServer validates PropertyName against the layer schema. KML GPKG layers from OGR
+# typically expose Name/description only; color columns are added by enrich_kml_gpkg_styles.
+KML_RASTER_SLD_BASIC = """<?xml version="1.0" encoding="UTF-8"?>
 <StyledLayerDescriptor version="1.0.0"
     xsi:schemaLocation="http://www.opengis.net/sld StyledLayerDescriptor.xsd"
     xmlns="http://www.opengis.net/sld"
@@ -569,6 +571,130 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
           </Filter>
           <PolygonSymbolizer>
             <Fill>
+              <CssParameter name="fill">#3388ff</CssParameter>
+              <CssParameter name="fill-opacity">0.35</CssParameter>
+            </Fill>
+            <Stroke>
+              <CssParameter name="stroke">#1a73e8</CssParameter>
+              <CssParameter name="stroke-width">1.5</CssParameter>
+            </Stroke>
+          </PolygonSymbolizer>
+        </Rule>
+        <Rule>
+          <Name>Line</Name>
+          <Filter>
+            <Or>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>LineString</Literal>
+              </PropertyIsEqualTo>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>MultiLineString</Literal>
+              </PropertyIsEqualTo>
+            </Or>
+          </Filter>
+          <LineSymbolizer>
+            <Stroke>
+              <CssParameter name="stroke">#e65100</CssParameter>
+              <CssParameter name="stroke-width">2</CssParameter>
+            </Stroke>
+          </LineSymbolizer>
+        </Rule>
+        <Rule>
+          <Name>Point</Name>
+          <Filter>
+            <Or>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>Point</Literal>
+              </PropertyIsEqualTo>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>MultiPoint</Literal>
+              </PropertyIsEqualTo>
+            </Or>
+          </Filter>
+          <PointSymbolizer>
+            <Graphic>
+              <Mark>
+                <WellKnownName>circle</WellKnownName>
+                <Fill><CssParameter name="fill">#d32f2f</CssParameter></Fill>
+                <Stroke>
+                  <CssParameter name="stroke">#ffffff</CssParameter>
+                  <CssParameter name="stroke-width">0.5</CssParameter>
+                </Stroke>
+              </Mark>
+              <Size>8</Size>
+            </Graphic>
+          </PointSymbolizer>
+        </Rule>
+        <Rule>
+          <Name>Label</Name>
+          <Filter>
+            <Or>
+              <PropertyIsNotEqualTo>
+                <PropertyName>Name</PropertyName>
+                <Literal></Literal>
+              </PropertyIsNotEqualTo>
+              <PropertyIsNotEqualTo>
+                <PropertyName>description</PropertyName>
+                <Literal></Literal>
+              </PropertyIsNotEqualTo>
+            </Or>
+          </Filter>
+          <TextSymbolizer uom="http://www.opengeospatial.org/se/units/metre">
+            <Label>
+              <ogc:Function name="if_then_else">
+                <ogc:Function name="isNull"><PropertyName>Name</PropertyName></ogc:Function>
+                <PropertyName>description</PropertyName>
+                <PropertyName>Name</PropertyName>
+              </ogc:Function>
+            </Label>
+            <Font>
+              <CssParameter name="font-family">Microsoft YaHei, SimSun, Arial, sans-serif</CssParameter>
+              <CssParameter name="font-size">2.5</CssParameter>
+            </Font>
+            <Fill><CssParameter name="fill">#212121</CssParameter></Fill>
+            <VendorOption name="maxDisplacement">200</VendorOption>
+            <VendorOption name="partials">true</VendorOption>
+            <VendorOption name="conflictResolution">false</VendorOption>
+          </TextSymbolizer>
+        </Rule>
+      </FeatureTypeStyle>
+    </UserStyle>
+  </NamedLayer>
+</StyledLayerDescriptor>
+"""
+
+KML_RASTER_SLD_STYLED = """<?xml version="1.0" encoding="UTF-8"?>
+<StyledLayerDescriptor version="1.0.0"
+    xsi:schemaLocation="http://www.opengis.net/sld StyledLayerDescriptor.xsd"
+    xmlns="http://www.opengis.net/sld"
+    xmlns:ogc="http://www.opengis.net/ogc"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <NamedLayer>
+    <Name>kml_raster_style</Name>
+    <UserStyle>
+      <Title>KML Raster Style (with colors)</Title>
+      <FeatureTypeStyle>
+        <Rule>
+          <Name>Polygon</Name>
+          <Filter>
+            <Or>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>Polygon</Literal>
+              </PropertyIsEqualTo>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>MultiPolygon</Literal>
+              </PropertyIsEqualTo>
+            </Or>
+          </Filter>
+          <PolygonSymbolizer>
+            <Fill>
               <CssParameter name="fill">
                 <ogc:Function name="if_then_else">
                   <ogc:Function name="isNull"><PropertyName>fill_color</PropertyName></ogc:Function>
@@ -576,13 +702,7 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
                   <PropertyName>fill_color</PropertyName>
                 </ogc:Function>
               </CssParameter>
-              <CssParameter name="fill-opacity">
-                <ogc:Function name="if_then_else">
-                  <ogc:Function name="isNull"><PropertyName>fill_color</PropertyName></ogc:Function>
-                  <ogc:Literal>0.25</ogc:Literal>
-                  <ogc:Literal>0.55</ogc:Literal>
-                </ogc:Function>
-              </CssParameter>
+              <CssParameter name="fill-opacity">0.55</CssParameter>
             </Fill>
             <Stroke>
               <CssParameter name="stroke">
@@ -592,13 +712,7 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
                   <PropertyName>line_color</PropertyName>
                 </ogc:Function>
               </CssParameter>
-              <CssParameter name="stroke-width">
-                <ogc:Function name="if_then_else">
-                  <ogc:Function name="isNull"><PropertyName>line_width</PropertyName></ogc:Function>
-                  <ogc:Literal>1.5</ogc:Literal>
-                  <PropertyName>line_width</PropertyName>
-                </ogc:Function>
-              </CssParameter>
+              <CssParameter name="stroke-width">1.5</CssParameter>
             </Stroke>
           </PolygonSymbolizer>
         </Rule>
@@ -625,13 +739,7 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
                   <PropertyName>line_color</PropertyName>
                 </ogc:Function>
               </CssParameter>
-              <CssParameter name="stroke-width">
-                <ogc:Function name="if_then_else">
-                  <ogc:Function name="isNull"><PropertyName>line_width</PropertyName></ogc:Function>
-                  <ogc:Literal>2</ogc:Literal>
-                  <PropertyName>line_width</PropertyName>
-                </ogc:Function>
-              </CssParameter>
+              <CssParameter name="stroke-width">2</CssParameter>
             </Stroke>
           </LineSymbolizer>
         </Rule>
@@ -657,11 +765,7 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
                   <CssParameter name="fill">
                     <ogc:Function name="if_then_else">
                       <ogc:Function name="isNull"><PropertyName>fill_color</PropertyName></ogc:Function>
-                      <ogc:Function name="if_then_else">
-                        <ogc:Function name="isNull"><PropertyName>line_color</PropertyName></ogc:Function>
-                        <ogc:Literal>#d32f2f</ogc:Literal>
-                        <PropertyName>line_color</PropertyName>
-                      </ogc:Function>
+                      <ogc:Literal>#d32f2f</ogc:Literal>
                       <PropertyName>fill_color</PropertyName>
                     </ogc:Function>
                   </CssParameter>
@@ -680,15 +784,11 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
           <Filter>
             <Or>
               <PropertyIsNotEqualTo>
-                <PropertyName>text_content</PropertyName>
-                <Literal></Literal>
-              </PropertyIsNotEqualTo>
-              <PropertyIsNotEqualTo>
                 <PropertyName>Name</PropertyName>
                 <Literal></Literal>
               </PropertyIsNotEqualTo>
               <PropertyIsNotEqualTo>
-                <PropertyName>name</PropertyName>
+                <PropertyName>description</PropertyName>
                 <Literal></Literal>
               </PropertyIsNotEqualTo>
             </Or>
@@ -696,46 +796,16 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
           <TextSymbolizer uom="http://www.opengeospatial.org/se/units/metre">
             <Label>
               <ogc:Function name="if_then_else">
-                <ogc:Function name="isNull"><PropertyName>text_content</PropertyName></ogc:Function>
-                <ogc:Function name="if_then_else">
-                  <ogc:Function name="isNull"><PropertyName>Name</PropertyName></ogc:Function>
-                  <ogc:Function name="if_then_else">
-                    <ogc:Function name="isNull"><PropertyName>name</PropertyName></ogc:Function>
-                    <ogc:Function name="if_then_else">
-                      <ogc:Function name="isNull"><PropertyName>description</PropertyName></ogc:Function>
-                      <ogc:Literal></ogc:Literal>
-                      <PropertyName>description</PropertyName>
-                    </ogc:Function>
-                    <PropertyName>name</PropertyName>
-                  </ogc:Function>
-                  <PropertyName>Name</PropertyName>
-                </ogc:Function>
-                <PropertyName>text_content</PropertyName>
+                <ogc:Function name="isNull"><PropertyName>Name</PropertyName></ogc:Function>
+                <PropertyName>description</PropertyName>
+                <PropertyName>Name</PropertyName>
               </ogc:Function>
             </Label>
             <Font>
               <CssParameter name="font-family">Microsoft YaHei, SimSun, Arial, sans-serif</CssParameter>
-              <CssParameter name="font-size">
-                <ogc:Function name="if_then_else">
-                  <ogc:Function name="isNull"><PropertyName>text_size</PropertyName></ogc:Function>
-                  <ogc:Literal>2.5</ogc:Literal>
-                  <PropertyName>text_size</PropertyName>
-                </ogc:Function>
-              </CssParameter>
+              <CssParameter name="font-size">2.5</CssParameter>
             </Font>
-            <Fill>
-              <CssParameter name="fill">
-                <ogc:Function name="if_then_else">
-                  <ogc:Function name="isNull"><PropertyName>text_color</PropertyName></ogc:Function>
-                  <ogc:Function name="if_then_else">
-                    <ogc:Function name="isNull"><PropertyName>line_color</PropertyName></ogc:Function>
-                    <ogc:Literal>#212121</ogc:Literal>
-                    <PropertyName>line_color</PropertyName>
-                  </ogc:Function>
-                  <PropertyName>text_color</PropertyName>
-                </ogc:Function>
-              </CssParameter>
-            </Fill>
+            <Fill><CssParameter name="fill">#212121</CssParameter></Fill>
             <VendorOption name="maxDisplacement">200</VendorOption>
             <VendorOption name="partials">true</VendorOption>
             <VendorOption name="conflictResolution">false</VendorOption>
@@ -746,6 +816,8 @@ KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
   </NamedLayer>
 </StyledLayerDescriptor>
 """
+
+KML_STYLE_COLOR_COLUMNS = {"line_color", "fill_color"}
 
 def ensure_dwg_style() -> tuple[bool, str]:
     """Ensure dwg_generic_style exists"""
@@ -1312,13 +1384,22 @@ def get_kml_raster_url(layer_name: str) -> str:
     return _build_raster_wmts_url(layer_name, "kml_raster_style")
 
 
-def ensure_kml_raster_style() -> tuple[bool, str]:
+def pick_kml_raster_sld(gpkg_path: Path, table_name: str) -> str:
+    """Use color-aware SLD only when those columns exist in the GeoPackage."""
+    columns = _get_gpkg_layer_columns(gpkg_path, table_name)
+    if KML_STYLE_COLOR_COLUMNS <= columns:
+        return KML_RASTER_SLD_STYLED
+    return KML_RASTER_SLD_BASIC
+
+
+def ensure_kml_raster_style(sld_body: str | None = None) -> tuple[bool, str]:
     """Ensure kml_raster_style exists for KML raster tiles."""
     try:
         style_name = "kml_raster_style"
         ws = settings.geoserver_workspace
         base = settings.geoserver_url.rstrip("/")
         url = f"{base}/rest/workspaces/{ws}/styles/{style_name}.json"
+        sld_content = sld_body or KML_RASTER_SLD_BASIC
 
         with httpx.Client(timeout=30.0) as client:
             h_sld = {**_auth_headers(), "Content-Type": "application/vnd.ogc.sld+xml"}
@@ -1327,7 +1408,7 @@ def ensure_kml_raster_style() -> tuple[bool, str]:
                 client.put(
                     f"{base}/rest/workspaces/{ws}/styles/{style_name}",
                     headers=h_sld,
-                    content=KML_RASTER_SLD,
+                    content=sld_content,
                 )
                 return True, ""
 
@@ -1336,7 +1417,7 @@ def ensure_kml_raster_style() -> tuple[bool, str]:
                 create_url,
                 params={"name": style_name},
                 headers=h_sld,
-                content=KML_RASTER_SLD,
+                content=sld_content,
             )
             if r2.status_code in (200, 201):
                 return True, ""
@@ -1694,11 +1775,14 @@ def publish_gpkg_layers(
                 elif source_format == "kml":
                     kml_ok, kml_missing = get_kml_raster_style_compatibility(gpkg_path, native_name)
                     if kml_ok:
+                        kml_sld = pick_kml_raster_sld(gpkg_path, native_name)
                         if not kml_raster_style_ready:
-                            ok_kml_style, msg_kml_style = ensure_kml_raster_style()
+                            ok_kml_style, msg_kml_style = ensure_kml_raster_style(kml_sld)
                             if not ok_kml_style:
                                 return False, [], f"KML raster style creation failed: {msg_kml_style}"
                             kml_raster_style_ready = True
+                        else:
+                            ensure_kml_raster_style(kml_sld)
 
                         ok_kml_attach, msg_kml_attach = add_kml_raster_style_to_layer(layer_name)
                         if not ok_kml_attach:

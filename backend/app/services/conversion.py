@@ -2909,9 +2909,6 @@ def enrich_kml_gpkg_styles(gpkg_path: Path, kml_path: Path) -> None:
         if resolved:
             styles_by_name[placemark["name"]] = resolved
 
-    if not styles_by_name:
-        return
-
     conn = sqlite3.connect(str(gpkg_path))
     try:
         for table_name in get_gpkg_feature_layers(gpkg_path):
