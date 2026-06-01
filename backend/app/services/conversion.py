@@ -2489,6 +2489,13 @@ def _convert_vector_to_gpkg_safe(
 
     if progress_callback:
         progress_callback(100, "转换完成")
+
+    if source_label == "KML":
+        try:
+            enrich_kml_gpkg_styles(gpkg_path, source_path)
+        except Exception as exc:
+            print(f"KML style enrichment warning: {exc}")
+
     return True, gpkg_path, ""
 
 
@@ -2774,12 +2781,6 @@ def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None
 
     if progress_callback:
         progress_callback(100, "转换完成")
-
-    if source_label == "KML":
-        try:
-            enrich_kml_gpkg_styles(gpkg_path, source_path)
-        except Exception as exc:
-            print(f"KML style enrichment warning: {exc}")
 
     return True, gpkg_path, ""
 
