@@ -62,24 +62,31 @@ def _layer_name_for(job_id: str, native_layer_name: str, index: int) -> str:
     return f"layer_{job_id}_{index}_{_safe_layer_token(native_layer_name)}"
 
 
-def _layer_raster_url(gpkg_path: Path, native_layer_name: str, layer_name: str) -> str:
-    raster_url, _uses_cad_raster = gs.resolve_layer_raster_url(
-        gpkg_path, native_layer_name, layer_name
+def _layer_raster_url(
+    gpkg_path: Path,
+    native_layer_name: str,
+    layer_name: str,
+    source_format: str | None = None,
+) -> str | None:
+    return gs.resolve_layer_raster_url(
+        gpkg_path,
+        native_layer_name,
+        layer_name,
+        source_format=source_format,
     )
-    return raster_url
 
 
 def _build_done_message(published_layers: list[dict]) -> str:
-    generic_raster = [
+    disabled = [
         layer for layer in published_layers
-        if layer.get("mvt_url") and not layer.get("raster_enabled", True)
+        if layer.get("mvt_url") and not layer.get("raster_url")
     ]
-    if not generic_raster:
+    if not disabled:
         return "转换并发布完成"
 
-    names = ", ".join(layer["native_layer_name"] for layer in generic_raster[:3])
-    suffix = " 等图层" if len(generic_raster) > 3 else ""
-    return f"转换完成；{names}{suffix} 使用默认栅格样式（未提取完整 CAD 样式字段）"
+    names = ", ".join(layer["native_layer_name"] for layer in disabled[:3])
+    suffix = " 等图层" if len(disabled) > 3 else ""
+    return f"转换完成，矢量切片可用；{names}{suffix} 未启用栅格样式"
 
 
 def _persist_job(job_id: str) -> None:
@@ -125,6 +132,10 @@ def _load_job(job_id: str) -> dict | None:
     primary_layer_name = None
     primary_bbox = None
 
+    source_format = None
+    if source_path:
+        source_format = SUPPORTED_EXTENSIONS.get(source_path.suffix.lower())
+
     if gpkg_path and gpkg_path.exists():
         native_layers = conversion.get_gpkg_feature_layers(gpkg_path)
         layers = []
@@ -135,7 +146,12 @@ def _load_job(job_id: str) -> dict | None:
                 "layer_name": layer_name,
                 "native_layer_name": native_layer_name,
                 "mvt_url": gs.get_mvt_url(layer_name),
-                "raster_url": _layer_raster_url(gpkg_path, native_layer_name, layer_name),
+                "raster_url": _layer_raster_url(
+                    gpkg_path,
+                    native_layer_name,
+                    layer_name,
+                    source_format=source_format,
+                ),
                 "bbox": bbox if ok_bbox else None,
             }
             layers.append(layer_info)
@@ -156,7 +172,12 @@ def _load_job(job_id: str) -> dict | None:
         "layers": layers,
         "mvt_url": gs.get_mvt_url(primary_layer_name) if primary_layer_name else None,
         "raster_url": (
-            _layer_raster_url(gpkg_path, native_layers[0], primary_layer_name)
+            _layer_raster_url(
+                gpkg_path,
+                native_layers[0],
+                primary_layer_name,
+                source_format=source_format,
+            )
             if primary_layer_name and gpkg_path and gpkg_path.exists() and native_layers
             else None
         ),
@@ -297,6 +318,7 @@ def process_conversion_task(job_id: str, source_path: Path, job_dir: Path, sourc
             gpkg_path,
             f"job_{job_id}",
             layer_specs,
+            source_format=source_format,
         )
         if not ok_pub:
             _update_job(job_id, status="error", message=f"GeoServer 发布失败: {pub_err}", progress=0)

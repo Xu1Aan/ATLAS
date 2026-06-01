@@ -11,6 +11,7 @@ import struct
 from pathlib import Path
 import math
 import zipfile
+import xml.etree.ElementTree as ET
 
 from app.config import settings
 
@@ -2773,7 +2774,202 @@ def convert_dxf_to_gpkg(dxf_path: Path, output_dir: Path, progress_callback=None
 
     if progress_callback:
         progress_callback(100, "转换完成")
+
+    if source_label == "KML":
+        try:
+            enrich_kml_gpkg_styles(gpkg_path, source_path)
+        except Exception as exc:
+            print(f"KML style enrichment warning: {exc}")
+
     return True, gpkg_path, ""
+
+
+def _kml_local_tag(tag: str) -> str:
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def _kml_color_to_hex(color_text: str | None) -> str | None:
+    if not color_text:
+        return None
+    raw = color_text.strip().lstrip("#")
+    if len(raw) == 8:
+        # KML aabbggrr -> #RRGGBB
+        return f"#{raw[6:8]}{raw[4:6]}{raw[2:4]}"
+    if len(raw) == 6:
+        return f"#{raw}"
+    return None
+
+
+def _extract_kml_style_from_element(style_elem: ET.Element) -> dict[str, str | float]:
+    style: dict[str, str | float] = {}
+    for node in style_elem.iter():
+        tag = _kml_local_tag(node.tag)
+        if tag == "LineStyle":
+            color = _kml_color_to_hex(_kml_child_text(node, "color"))
+            if color:
+                style["line_color"] = color
+            width = _kml_child_text(node, "width")
+            if width:
+                try:
+                    style["line_width"] = max(float(width), 0.5)
+                except ValueError:
+                    pass
+        elif tag == "PolyStyle":
+            color = _kml_color_to_hex(_kml_child_text(node, "color"))
+            if color:
+                style["fill_color"] = color
+        elif tag == "IconStyle":
+            color = _kml_color_to_hex(_kml_child_text(node, "color"))
+            if color:
+                style["line_color"] = color
+                style["fill_color"] = color
+        elif tag == "LabelStyle":
+            color = _kml_color_to_hex(_kml_child_text(node, "color"))
+            if color:
+                style["text_color"] = color
+            scale = _kml_child_text(node, "scale")
+            if scale:
+                try:
+                    style["text_size"] = max(float(scale) * 2.5, 0.5)
+                except ValueError:
+                    pass
+    return style
+
+
+def _kml_child_text(parent: ET.Element, local_name: str) -> str | None:
+    for child in parent:
+        if _kml_local_tag(child.tag) == local_name:
+            return (child.text or "").strip()
+    return None
+
+
+def _parse_kml_style_catalog(kml_path: Path) -> tuple[dict[str, dict], list[dict]]:
+    tree = ET.parse(kml_path)
+    root = tree.getroot()
+
+    shared_styles: dict[str, dict] = {}
+    placemarks: list[dict] = []
+
+    for elem in root.iter():
+        if _kml_local_tag(elem.tag) != "Style":
+            continue
+        style_id = elem.get("id")
+        if not style_id:
+            continue
+        parsed = _extract_kml_style_from_element(elem)
+        shared_styles[style_id] = parsed
+        shared_styles[f"#{style_id}"] = parsed
+
+    for elem in root.iter():
+        if _kml_local_tag(elem.tag) != "Placemark":
+            continue
+        name = None
+        style_url = None
+        inline_style: dict[str, str | float] = {}
+        for child in elem:
+            child_tag = _kml_local_tag(child.tag)
+            if child_tag == "name":
+                name = (child.text or "").strip()
+            elif child_tag == "styleUrl":
+                style_url = (child.text or "").strip()
+            elif child_tag == "Style":
+                inline_style = _extract_kml_style_from_element(child)
+        placemarks.append(
+            {
+                "name": name,
+                "style_url": style_url,
+                "inline": inline_style,
+            }
+        )
+
+    return shared_styles, placemarks
+
+
+def _merge_kml_styles(*styles: dict) -> dict:
+    merged: dict = {}
+    for style in styles:
+        if style:
+            merged.update(style)
+    return merged
+
+
+def enrich_kml_gpkg_styles(gpkg_path: Path, kml_path: Path) -> None:
+    """Copy KML LineStyle/PolyStyle colors into GeoPackage columns for raster SLD."""
+    shared_styles, placemarks = _parse_kml_style_catalog(kml_path)
+    styles_by_name: dict[str, dict] = {}
+    for placemark in placemarks:
+        if not placemark.get("name"):
+            continue
+        resolved = _merge_kml_styles(
+            shared_styles.get(placemark.get("style_url") or "", {}),
+            placemark.get("inline") or {},
+        )
+        if resolved:
+            styles_by_name[placemark["name"]] = resolved
+
+    if not styles_by_name:
+        return
+
+    conn = sqlite3.connect(str(gpkg_path))
+    try:
+        for table_name in get_gpkg_feature_layers(gpkg_path):
+            cur = conn.cursor()
+            cur.execute(f'PRAGMA table_info("{table_name}")')
+            existing = {row[1] for row in cur.fetchall() if row and row[1]}
+            for column, col_type in (
+                ("line_color", "TEXT"),
+                ("fill_color", "TEXT"),
+                ("text_color", "TEXT"),
+                ("text_content", "TEXT"),
+                ("text_size", "REAL"),
+                ("line_width", "REAL"),
+            ):
+                if column not in existing:
+                    cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN {column} {col_type}')
+
+            cur.execute(f'PRAGMA table_info("{table_name}")')
+            existing = {row[1] for row in cur.fetchall() if row and row[1]}
+            name_columns = [col for col in ("Name", "name", "description") if col in existing]
+            if not name_columns:
+                continue
+
+            cur.execute(f'SELECT rowid, * FROM "{table_name}"')
+            column_names = [desc[0] for desc in cur.description]
+            updates = []
+            for row in cur.fetchall():
+                rowid = row[0]
+                row_map = dict(zip(column_names, row))
+                matched_style = None
+                for col in name_columns:
+                    value = row_map.get(col)
+                    if value and value in styles_by_name:
+                        matched_style = styles_by_name[value]
+                        break
+                if not matched_style:
+                    continue
+                updates.append((rowid, matched_style, row_map))
+
+            for rowid, matched_style, row_map in updates:
+                set_parts = []
+                params = []
+                label = row_map.get("Name") or row_map.get("name") or row_map.get("description")
+                if label and "text_content" not in matched_style:
+                    matched_style = {**matched_style, "text_content": str(label)}
+                for field in ("line_color", "fill_color", "text_color", "text_content", "text_size", "line_width"):
+                    if field in matched_style:
+                        set_parts.append(f"{field} = ?")
+                        params.append(matched_style[field])
+                if set_parts:
+                    params.append(rowid)
+                    cur.execute(
+                        f'UPDATE "{table_name}" SET {", ".join(set_parts)} WHERE rowid = ?',
+                        params,
+                    )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def convert_kml_to_gpkg(kml_path: Path, output_dir: Path, progress_callback=None) -> tuple[bool, Path | None, str]:

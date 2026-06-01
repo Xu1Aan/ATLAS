@@ -541,6 +541,212 @@ DWG_RASTER_SLD = """<?xml version="1.0" encoding="ISO-8859-1"?>
 </StyledLayerDescriptor>
 """
 
+KML_RASTER_SLD = """<?xml version="1.0" encoding="UTF-8"?>
+<StyledLayerDescriptor version="1.0.0"
+    xsi:schemaLocation="http://www.opengis.net/sld StyledLayerDescriptor.xsd"
+    xmlns="http://www.opengis.net/sld"
+    xmlns:ogc="http://www.opengis.net/ogc"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <NamedLayer>
+    <Name>kml_raster_style</Name>
+    <UserStyle>
+      <Title>KML Raster Style</Title>
+      <FeatureTypeStyle>
+        <Rule>
+          <Name>Polygon</Name>
+          <Filter>
+            <Or>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>Polygon</Literal>
+              </PropertyIsEqualTo>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>MultiPolygon</Literal>
+              </PropertyIsEqualTo>
+            </Or>
+          </Filter>
+          <PolygonSymbolizer>
+            <Fill>
+              <CssParameter name="fill">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>fill_color</PropertyName></ogc:Function>
+                  <ogc:Literal>#3388ff</ogc:Literal>
+                  <PropertyName>fill_color</PropertyName>
+                </ogc:Function>
+              </CssParameter>
+              <CssParameter name="fill-opacity">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>fill_color</PropertyName></ogc:Function>
+                  <ogc:Literal>0.25</ogc:Literal>
+                  <ogc:Literal>0.55</ogc:Literal>
+                </ogc:Function>
+              </CssParameter>
+            </Fill>
+            <Stroke>
+              <CssParameter name="stroke">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>line_color</PropertyName></ogc:Function>
+                  <ogc:Literal>#1a73e8</ogc:Literal>
+                  <PropertyName>line_color</PropertyName>
+                </ogc:Function>
+              </CssParameter>
+              <CssParameter name="stroke-width">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>line_width</PropertyName></ogc:Function>
+                  <ogc:Literal>1.5</ogc:Literal>
+                  <PropertyName>line_width</PropertyName>
+                </ogc:Function>
+              </CssParameter>
+            </Stroke>
+          </PolygonSymbolizer>
+        </Rule>
+        <Rule>
+          <Name>Line</Name>
+          <Filter>
+            <Or>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>LineString</Literal>
+              </PropertyIsEqualTo>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>MultiLineString</Literal>
+              </PropertyIsEqualTo>
+            </Or>
+          </Filter>
+          <LineSymbolizer>
+            <Stroke>
+              <CssParameter name="stroke">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>line_color</PropertyName></ogc:Function>
+                  <ogc:Literal>#e65100</ogc:Literal>
+                  <PropertyName>line_color</PropertyName>
+                </ogc:Function>
+              </CssParameter>
+              <CssParameter name="stroke-width">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>line_width</PropertyName></ogc:Function>
+                  <ogc:Literal>2</ogc:Literal>
+                  <PropertyName>line_width</PropertyName>
+                </ogc:Function>
+              </CssParameter>
+            </Stroke>
+          </LineSymbolizer>
+        </Rule>
+        <Rule>
+          <Name>Point</Name>
+          <Filter>
+            <Or>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>Point</Literal>
+              </PropertyIsEqualTo>
+              <PropertyIsEqualTo>
+                <Function name="geometryType"><PropertyName>geom</PropertyName></Function>
+                <Literal>MultiPoint</Literal>
+              </PropertyIsEqualTo>
+            </Or>
+          </Filter>
+          <PointSymbolizer>
+            <Graphic>
+              <Mark>
+                <WellKnownName>circle</WellKnownName>
+                <Fill>
+                  <CssParameter name="fill">
+                    <ogc:Function name="if_then_else">
+                      <ogc:Function name="isNull"><PropertyName>fill_color</PropertyName></ogc:Function>
+                      <ogc:Function name="if_then_else">
+                        <ogc:Function name="isNull"><PropertyName>line_color</PropertyName></ogc:Function>
+                        <ogc:Literal>#d32f2f</ogc:Literal>
+                        <PropertyName>line_color</PropertyName>
+                      </ogc:Function>
+                      <PropertyName>fill_color</PropertyName>
+                    </ogc:Function>
+                  </CssParameter>
+                </Fill>
+                <Stroke>
+                  <CssParameter name="stroke">#ffffff</CssParameter>
+                  <CssParameter name="stroke-width">0.5</CssParameter>
+                </Stroke>
+              </Mark>
+              <Size>8</Size>
+            </Graphic>
+          </PointSymbolizer>
+        </Rule>
+        <Rule>
+          <Name>Label</Name>
+          <Filter>
+            <Or>
+              <PropertyIsNotEqualTo>
+                <PropertyName>text_content</PropertyName>
+                <Literal></Literal>
+              </PropertyIsNotEqualTo>
+              <PropertyIsNotEqualTo>
+                <PropertyName>Name</PropertyName>
+                <Literal></Literal>
+              </PropertyIsNotEqualTo>
+              <PropertyIsNotEqualTo>
+                <PropertyName>name</PropertyName>
+                <Literal></Literal>
+              </PropertyIsNotEqualTo>
+            </Or>
+          </Filter>
+          <TextSymbolizer uom="http://www.opengeospatial.org/se/units/metre">
+            <Label>
+              <ogc:Function name="if_then_else">
+                <ogc:Function name="isNull"><PropertyName>text_content</PropertyName></ogc:Function>
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>Name</PropertyName></ogc:Function>
+                  <ogc:Function name="if_then_else">
+                    <ogc:Function name="isNull"><PropertyName>name</PropertyName></ogc:Function>
+                    <ogc:Function name="if_then_else">
+                      <ogc:Function name="isNull"><PropertyName>description</PropertyName></ogc:Function>
+                      <ogc:Literal></ogc:Literal>
+                      <PropertyName>description</PropertyName>
+                    </ogc:Function>
+                    <PropertyName>name</PropertyName>
+                  </ogc:Function>
+                  <PropertyName>Name</PropertyName>
+                </ogc:Function>
+                <PropertyName>text_content</PropertyName>
+              </ogc:Function>
+            </Label>
+            <Font>
+              <CssParameter name="font-family">Microsoft YaHei, SimSun, Arial, sans-serif</CssParameter>
+              <CssParameter name="font-size">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>text_size</PropertyName></ogc:Function>
+                  <ogc:Literal>2.5</ogc:Literal>
+                  <PropertyName>text_size</PropertyName>
+                </ogc:Function>
+              </CssParameter>
+            </Font>
+            <Fill>
+              <CssParameter name="fill">
+                <ogc:Function name="if_then_else">
+                  <ogc:Function name="isNull"><PropertyName>text_color</PropertyName></ogc:Function>
+                  <ogc:Function name="if_then_else">
+                    <ogc:Function name="isNull"><PropertyName>line_color</PropertyName></ogc:Function>
+                    <ogc:Literal>#212121</ogc:Literal>
+                    <PropertyName>line_color</PropertyName>
+                  </ogc:Function>
+                  <PropertyName>text_color</PropertyName>
+                </ogc:Function>
+              </CssParameter>
+            </Fill>
+            <VendorOption name="maxDisplacement">200</VendorOption>
+            <VendorOption name="partials">true</VendorOption>
+            <VendorOption name="conflictResolution">false</VendorOption>
+          </TextSymbolizer>
+        </Rule>
+      </FeatureTypeStyle>
+    </UserStyle>
+  </NamedLayer>
+</StyledLayerDescriptor>
+"""
+
 def ensure_dwg_style() -> tuple[bool, str]:
     """Ensure dwg_generic_style exists"""
     try:
@@ -692,6 +898,7 @@ def enable_gwc_mvt(layer_name: str) -> tuple[bool, str]:
         # Ensure BOTH styles are available in the GWC filter
         ET.SubElement(values, "string").text = f"{ws}:dwg_generic_style"
         ET.SubElement(values, "string").text = f"{ws}:dwg_raster_style"
+        ET.SubElement(values, "string").text = f"{ws}:kml_raster_style"
         
         xml_body = ET.tostring(root, encoding="unicode")
 
@@ -1071,32 +1278,16 @@ def add_raster_style_to_layer(layer_name: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def resolve_layer_raster_url(
-    gpkg_path: Path,
-    native_layer_name: str,
-    layer_name: str,
-) -> tuple[str, bool]:
-    """
-    Build a Mapbox/XYZ-compatible WMTS GetTile URL for the layer.
-
-    When CAD raster columns are present, use dwg_raster_style; otherwise fall back to
-    dwg_generic_style so KML/SHP layers still get PNG tiles from the same WMTS endpoint
-    as wmts_url (GetCapabilities).
-    """
-    raster_enabled, _missing = get_raster_style_compatibility(gpkg_path, native_layer_name)
-    if raster_enabled:
-        return get_raster_url_v2(layer_name), True
-    return get_raster_url(layer_name), False
-
-
 def get_raster_url_v2(layer_name: str) -> str:
     """Return XYZ raster tile URL using the new dwg_raster_style"""
+    return _build_raster_wmts_url(layer_name, "dwg_raster_style")
+
+
+def _build_raster_wmts_url(layer_name: str, style_name: str) -> str:
     base = _public_geoserver_base().rstrip("/")
     ws = settings.geoserver_workspace
-    
-    style_name = "dwg_raster_style"
     full_style_name = f"{ws}:{style_name}"
-    
+
     try:
         from urllib.parse import quote
         layer_param = quote(f"{ws}:{layer_name}")
@@ -1104,7 +1295,7 @@ def get_raster_url_v2(layer_name: str) -> str:
     except Exception:
         layer_param = f"{ws}:{layer_name}"
         style_param = full_style_name
-        
+
     return (
         f"{base}/gwc/service/wmts?"
         f"layer={layer_param}"
@@ -1114,6 +1305,76 @@ def get_raster_url_v2(layer_name: str) -> str:
         f"&style={style_param}"
         "&TileMatrix=EPSG:900913:{z}&TileRow={y}&TileCol={x}"
     )
+
+
+def get_kml_raster_url(layer_name: str) -> str:
+    """Return XYZ raster tile URL using kml_raster_style."""
+    return _build_raster_wmts_url(layer_name, "kml_raster_style")
+
+
+def ensure_kml_raster_style() -> tuple[bool, str]:
+    """Ensure kml_raster_style exists for KML raster tiles."""
+    try:
+        style_name = "kml_raster_style"
+        ws = settings.geoserver_workspace
+        base = settings.geoserver_url.rstrip("/")
+        url = f"{base}/rest/workspaces/{ws}/styles/{style_name}.json"
+
+        with httpx.Client(timeout=30.0) as client:
+            h_sld = {**_auth_headers(), "Content-Type": "application/vnd.ogc.sld+xml"}
+            r = client.get(url, headers=_auth_headers())
+            if r.status_code == 200:
+                client.put(
+                    f"{base}/rest/workspaces/{ws}/styles/{style_name}",
+                    headers=h_sld,
+                    content=KML_RASTER_SLD,
+                )
+                return True, ""
+
+            create_url = f"{base}/rest/workspaces/{ws}/styles"
+            r2 = client.post(
+                create_url,
+                params={"name": style_name},
+                headers=h_sld,
+                content=KML_RASTER_SLD,
+            )
+            if r2.status_code in (200, 201):
+                return True, ""
+            return False, f"Create KML raster style failed: {r2.status_code} {r2.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def add_kml_raster_style_to_layer(layer_name: str) -> tuple[bool, str]:
+    """Attach kml_raster_style without changing the default MVT style."""
+    try:
+        ws = settings.geoserver_workspace
+        base = settings.geoserver_url.rstrip("/")
+
+        ok, msg = ensure_kml_raster_style()
+        if not ok:
+            return False, msg
+
+        layer_url = f"{base}/rest/workspaces/{ws}/layers/{layer_name}.json"
+        with httpx.Client(timeout=30.0) as client:
+            h = {**_auth_headers(), "Content-Type": "application/json"}
+            layer_body = {
+                "layer": {
+                    "styles": {
+                        "style": [
+                            {"name": "dwg_generic_style", "workspace": ws},
+                            {"name": "kml_raster_style", "workspace": ws},
+                        ]
+                    }
+                }
+            }
+            r = client.put(layer_url, headers=h, json=layer_body)
+            if r.status_code == 200:
+                _update_gwc_layer_styles(layer_name, "kml_raster_style")
+                return True, ""
+            return False, f"Update layer KML styles failed: {r.status_code} {r.text[:200]}"
+    except Exception as e:
+        return False, str(e)
 
 
 def publish_gpkg(gpkg_path: Path, store_name: str, layer_name: str, native_layer_name: str = None) -> tuple[bool, str]:
@@ -1276,10 +1537,37 @@ def get_raster_style_compatibility(gpkg_path: Path, table_name: str) -> tuple[bo
     return not missing, missing
 
 
+def get_kml_raster_style_compatibility(gpkg_path: Path, table_name: str) -> tuple[bool, list[str]]:
+    columns = _get_gpkg_layer_columns(gpkg_path, table_name)
+    if not columns:
+        return False, ["table"]
+    if not (columns & {"geom", "GEOMETRY", "geometry"}):
+        return False, ["geom"]
+    return True, []
+
+
+def resolve_layer_raster_url(
+    gpkg_path: Path,
+    native_layer_name: str,
+    layer_name: str,
+    source_format: str | None = None,
+) -> str | None:
+    """Pick DWG or KML raster tile template based on GPKG columns and source format."""
+    cad_ok, _ = get_raster_style_compatibility(gpkg_path, native_layer_name)
+    if cad_ok:
+        return get_raster_url_v2(layer_name)
+    if source_format == "kml":
+        kml_ok, _ = get_kml_raster_style_compatibility(gpkg_path, native_layer_name)
+        if kml_ok:
+            return get_kml_raster_url(layer_name)
+    return None
+
+
 def publish_gpkg_layers(
     gpkg_path: Path,
     store_name: str,
     layer_specs: list[dict[str, str]],
+    source_format: str | None = None,
 ) -> tuple[bool, list[dict], str]:
     """Upload a GeoPackage once and publish multiple feature layers."""
     try:
@@ -1297,6 +1585,7 @@ def publish_gpkg_layers(
         headers = _auth_headers()
         published_layers: list[dict] = []
         raster_style_ready = False
+        kml_raster_style_ready = False
 
         with httpx.Client(timeout=60.0) as client:
             ok_delete, msg_delete = _delete_datastore_if_exists(client, ws, store_name, headers)
@@ -1387,7 +1676,9 @@ def publish_gpkg_layers(
                 )
 
                 raster_enabled, missing_columns = get_raster_style_compatibility(gpkg_path, native_name)
+                raster_url = None
                 raster_message = None
+                raster_style_kind = None
                 if raster_enabled:
                     if not raster_style_ready:
                         ok_raster_style, msg_raster_style = ensure_dwg_raster_style()
@@ -1399,10 +1690,30 @@ def publish_gpkg_layers(
                     if not ok_style_attach:
                         return False, [], f"Attach raster style failed for {layer_name}: {msg_style_attach}"
                     raster_url = get_raster_url_v2(layer_name)
+                    raster_style_kind = "dwg"
+                elif source_format == "kml":
+                    kml_ok, kml_missing = get_kml_raster_style_compatibility(gpkg_path, native_name)
+                    if kml_ok:
+                        if not kml_raster_style_ready:
+                            ok_kml_style, msg_kml_style = ensure_kml_raster_style()
+                            if not ok_kml_style:
+                                return False, [], f"KML raster style creation failed: {msg_kml_style}"
+                            kml_raster_style_ready = True
+
+                        ok_kml_attach, msg_kml_attach = add_kml_raster_style_to_layer(layer_name)
+                        if not ok_kml_attach:
+                            return False, [], f"Attach KML raster style failed for {layer_name}: {msg_kml_attach}"
+                        raster_url = get_kml_raster_url(layer_name)
+                        raster_enabled = True
+                        raster_style_kind = "kml"
+                        missing_columns = []
+                    else:
+                        raster_message = (
+                            "未启用 KML 栅格样式，缺少: " + ", ".join(kml_missing)
+                        )
                 else:
-                    raster_url = get_raster_url(layer_name)
                     raster_message = (
-                        "使用默认栅格样式（dwg_generic_style），缺少字段: "
+                        "未启用栅格样式，缺少字段: "
                         + ", ".join(missing_columns)
                     )
 
@@ -1421,6 +1732,7 @@ def publish_gpkg_layers(
                         "mvt_url": get_mvt_url(layer_name),
                         "raster_url": raster_url,
                         "raster_enabled": raster_enabled,
+                        "raster_style": raster_style_kind,
                         "raster_message": raster_message,
                         "missing_raster_columns": missing_columns,
                         "bbox": list(bbox) if bbox else None,
