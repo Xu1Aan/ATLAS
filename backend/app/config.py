@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     geoserver_user: str = "admin"
     geoserver_password: str = "geoserver"
     geoserver_workspace: str = "dwg"
-    geoserver_public_url: str = "http://10.20.124.50:30030/public/dwgconvert/geoserver"
+    geoserver_public_url: str = "http://10.20.124.10/public/dwgconvert/geoserver"
     minio_endpoint: str = "http://10.20.124.73:9000"
     minio_access_key: str = ""
     minio_secret_key: str = ""
