@@ -6,7 +6,8 @@
 **/.venv
 **/node_modules
 **/dist
-**/data
+services/api/data
 **/*.pyc
 **/*.pyo
 **/*.log
+.env

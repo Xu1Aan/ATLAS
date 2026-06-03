@@ -20,11 +20,13 @@ yarn-error.log*
 *.swp
 *.swo
 
-# Project Specific
-backend/data/
-backend/tools/
+# Environment
+.env
+
+# Project specific
+services/api/data/
+services/api/tools/
 *.log
 *.gpkg
 *.dwg
 *.dxf
-# .env

@@ -1,16 +1,48 @@
+name: atlas
+
 services:
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set atlas http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing atlas/$${MINIO_DEFAULT_BUCKET}
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme}
+      MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET:-atlas-data}
+    restart: "no"
+
   geoserver:
-    image: docker.osgeo.org/geoserver:2.28.0
+    build:
+      context: ./services/geoserver
     restart: unless-stopped
     environment:
       GEOSERVER_ADMIN_USER: ${APP_GEOSERVER_USER:-admin}
       GEOSERVER_ADMIN_PASSWORD: ${APP_GEOSERVER_PASSWORD:-geoserver}
-      INSTALL_EXTENSIONS: "true"
-      STABLE_EXTENSIONS: "vectortiles"
       PROXY_BASE_URL: ${APP_GEOSERVER_PUBLIC_URL:-http://localhost:18081/geoserver}
     volumes:
       - geoserver_data:/opt/geoserver/data_dir
-      - shared_jobs:/data:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/geoserver/web/"]
       interval: 20s
@@ -18,9 +50,12 @@ services:
       retries: 12
       start_period: 90s
 
-  backend:
+  api:
     build:
-      context: ./backend
+      context: ./services/api
+    labels:
+      org.opencontainers.image.vendor: ATLAS
+      org.opencontainers.image.authors: "徐岸 <toxuan1998@qq.com>"
     restart: unless-stopped
     environment:
       APP_WORK_DIR: /data
@@ -33,20 +68,22 @@ services:
       APP_GEOSERVER_PUBLIC_URL: ${APP_GEOSERVER_PUBLIC_URL:-http://localhost:18081/geoserver}
       APP_GEOSERVER_USER: ${APP_GEOSERVER_USER:-admin}
       APP_GEOSERVER_PASSWORD: ${APP_GEOSERVER_PASSWORD:-geoserver}
-      APP_GEOSERVER_WORKSPACE: ${APP_GEOSERVER_WORKSPACE:-dwg}
-      APP_MINIO_ENDPOINT: ${APP_MINIO_ENDPOINT:-http://10.20.124.73:9000}
-      APP_MINIO_ACCESS_KEY: ${APP_MINIO_ACCESS_KEY:-}
-      APP_MINIO_SECRET_KEY: ${APP_MINIO_SECRET_KEY:-}
+      APP_GEOSERVER_WORKSPACE: ${APP_GEOSERVER_WORKSPACE:-atlas}
+      APP_MINIO_ENDPOINT: http://minio:9000
+      APP_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      APP_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-changeme}
       APP_MINIO_SECURE: ${APP_MINIO_SECURE:-false}
       APP_MINIO_PATH_STYLE: ${APP_MINIO_PATH_STYLE:-true}
       APP_MINIO_REGION: ${APP_MINIO_REGION:-}
     volumes:
-      - shared_jobs:/data
+      - atlas_jobs:/data
     depends_on:
+      minio-init:
+        condition: service_completed_successfully
       geoserver:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/healthz')"]
       interval: 15s
       timeout: 5s
       retries: 8
@@ -54,16 +91,20 @@ services:
 
   web:
     build:
-      context: ./frontend
+      context: ./services/web
+    labels:
+      org.opencontainers.image.vendor: ATLAS
+      org.opencontainers.image.authors: "徐岸 <toxuan1998@qq.com>"
     restart: unless-stopped
     ports:
-      - "18081:80"
+      - "${ATLAS_HOST_PORT:-18081}:80"
     depends_on:
-      backend:
+      api:
         condition: service_healthy
       geoserver:
         condition: service_healthy
 
 volumes:
+  minio_data:
   geoserver_data:
-  shared_jobs:
+  atlas_jobs:
