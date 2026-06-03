@@ -55,7 +55,8 @@ https://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz"; \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -i "${PIP_INDEX_URL}" -r requirements.txt
 
-COPY .env ./.env
+ARG APP_ENV=dev
+COPY .env.${APP_ENV} ./.env
 COPY app ./app
 
 EXPOSE 80

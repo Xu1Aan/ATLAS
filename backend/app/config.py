@@ -1,9 +1,27 @@
 # -*- coding: utf-8 -*-
 """Application settings for local and container deployments."""
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def _resolve_env_files() -> tuple[str, ...]:
+    app_env = os.getenv("APP_ENV", "").strip().lower()
+    files: list[Path] = []
+    if app_env in {"pro", "prod", "production"}:
+        files.append(_BACKEND_DIR / ".env.pro")
+    elif app_env in {"dev", "development"}:
+        files.append(_BACKEND_DIR / ".env.dev")
+    local_env = _BACKEND_DIR / ".env"
+    if local_env.exists():
+        files.append(local_env)
+    if files:
+        return tuple(str(path) for path in files)
+    return (str(_BACKEND_DIR / ".env.dev"),)
 
 
 class Settings(BaseSettings):
@@ -29,7 +47,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_prefix = "APP_"
-        env_file = ".env"
+        env_file = _resolve_env_files()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

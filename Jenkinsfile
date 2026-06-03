@@ -81,6 +81,7 @@ docker build \\
   --build-arg APT_MIRROR=${env.APT_MIRROR} \\
   --build-arg PIP_INDEX_URL=${env.PIP_INDEX_URL} \\
   --build-arg GNU_MIRROR=${env.GNU_MIRROR} \\
+  --build-arg APP_ENV=${env.APP_ENV} \\
   -t ${localImage} \\
   ./backend
 docker image inspect ${localImage} >/dev/null
